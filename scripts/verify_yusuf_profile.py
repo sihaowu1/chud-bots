@@ -34,7 +34,7 @@ async def main():
                 raise RuntimeError("Saved profile did not confirm Reddit authentication; no credentials submitted")
             dreamer._reddit_authenticated = True
             await dreamer._dream(page)
-            print("Completed 10-second logged-in hold without submitting credentials", flush=True)
+            print("Completed 5-minute logged-in hold without submitting credentials", flush=True)
     finally:
         await steel_client.release_session(session.id)
     await steel_client.wait_for_profile_ready(profile_id)

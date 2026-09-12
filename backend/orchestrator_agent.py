@@ -1,8 +1,7 @@
 """Model-backed coordinator for assigning social-demo work to dreamers.
 
-This module plans work and records adapter callbacks. It deliberately contains
-no Reddit automation: another component may execute assignments only against a
-mock community or a private, consented environment.
+This module plans structured commands and records adapter callbacks. The CLI
+executor runs them against a mock community or a private, consented environment.
 """
 
 from __future__ import annotations
@@ -34,11 +33,13 @@ _PLAN_SCHEMA = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["persona", "action", "instructions", "target_url", "wait_for"],
+                "required": ["persona", "action", "instructions", "target_url", "wait_for", "title", "body"],
                 "properties": {
                     "persona": {"type": "string"},
                     "action": {"type": "string", "enum": sorted(ALLOWED_ACTIONS)},
                     "instructions": {"type": "string"},
+                    "title": {"type": ["string", "null"]},
+                    "body": {"type": ["string", "null"]},
                     "target_url": {"type": ["string", "null"]},
                     "wait_for": {"type": "array", "items": {"type": "string"}},
                 },
@@ -54,7 +55,13 @@ each selected synthetic persona. The only actions are create_post, comment, and 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
 Do not assign duplicate work that is already completed or in progress. Keep persona voices
-distinct, but do not write final post/comment copy; give concise execution instructions.
+distinct. Supply final title and body for create_post, body for comment, and null
+title/body for wait. Instructions summarize the command. The publisher appends an
+automated-demo disclosure. Comments are top-level replies only. Use an observed post
+URL as target_url, or null with exactly one create_post task ID in wait_for whose
+completed URL the executor will use. Only r/HackathonsCanada is supported in private
+runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must reference
+tasks from previous phases. Never issue shell commands.
 
 This planner may operate only in a mock environment or a private environment whose
 participants consented. All content must be labeled synthetic. Never plan public coordinated
@@ -196,9 +203,14 @@ class CampaignOrchestrator:
             run = self._load(run_id)
             if persona not in run["personas"]:
                 raise ValueError(f"persona {persona!r} is not part of run {run_id}")
-            known_tasks = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
+            known_tasks = {task["id"]: task for phase in run["phases"] for task in phase["assignments"]}
             if task_id not in known_tasks:
                 raise ValueError(f"unknown task_id {task_id!r}")
+            task = known_tasks[task_id]
+            if task["persona"] != persona:
+                raise ValueError("activity persona does not own the task")
+            if kind != {"create_post": "post", "comment": "comment", "wait": "wait"}[task["action"]] and kind != "system":
+                raise ValueError("activity kind does not match the task")
             activity = {
                 "id": uuid.uuid4().hex[:12],
                 "run_id": run_id,
@@ -209,10 +221,12 @@ class CampaignOrchestrator:
                 "url": url,
                 "parent_url": parent_url,
                 "note": note,
+                "reddit_username": reddit_username,
                 "timestamp": _timestamp(),
             }
             agent_state_store.append_activity(
-                persona, activity, reddit_username=reddit_username
+                persona, activity,
+                reddit_username=reddit_username if run["environment"] == "private" else None,
             )
             run["events"].append({"type": "agent_activity", "persona": persona, **activity})
             run["updated_at"] = _timestamp()
@@ -302,6 +316,12 @@ class CampaignOrchestrator:
             wait_for = item.get("wait_for")
             if not isinstance(wait_for, list) or not all(isinstance(value, str) for value in wait_for):
                 raise OrchestratorModelError("wait_for must be a list of task IDs")
+            known_ids = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
+            if any(task_id not in known_ids for task_id in wait_for):
+                raise OrchestratorModelError("wait_for references an unknown task")
+            for field in ("title", "body", "target_url"):
+                if item.get(field) is not None and not isinstance(item[field], str):
+                    raise OrchestratorModelError(f"{field} must be a string or null")
             assignments.append(
                 {
                     "persona": item["persona"],
@@ -309,6 +329,8 @@ class CampaignOrchestrator:
                     "instructions": item["instructions"].strip(),
                     "target_url": item.get("target_url"),
                     "wait_for": wait_for,
+                    "title": item.get("title"),
+                    "body": item.get("body"),
                 }
             )
         return assignments
