@@ -1,0 +1,15 @@
+[project]
+name = "inception"
+version = "0.1.0"
+description = "Steel.dev dreamers that browse a target site like organic visitors, with a live display"
+requires-python = ">=3.12"
+dependencies = [
+    "steel-sdk==0.19.0",
+    "fastapi==0.141.1",
+    "uvicorn[standard]",
+    "playwright==1.62.0",
+    "python-dotenv",
+]
+
+[tool.uv]
+package = false

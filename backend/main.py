@@ -1,6 +1,6 @@
 """HTTP surface. Serves the display and exposes the orchestrator over JSON + SSE.
 
-Run from the repo root:  .venv/bin/uvicorn backend.main:app --reload
+Run from the repo root:  uv run uvicorn backend.main:app --reload
 """
 
 import asyncio

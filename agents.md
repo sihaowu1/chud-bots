@@ -60,9 +60,9 @@ the full state snapshot. The display is a pure function of those snapshots.
 ## Running
 
 ```
-uv venv .venv && uv pip install --python .venv/bin/python -r backend/requirements.txt
+uv sync
 cp .env.example .env   # fill in STEEL_API_KEY
-.venv/bin/uvicorn backend.main:app --reload
+uv run uvicorn backend.main:app --reload
 ```
 
 Open http://127.0.0.1:8000. No local Chromium is needed: Playwright connects
@@ -95,7 +95,7 @@ to Steel's browser over CDP, so `playwright install` is not required.
 
 ## Conventions
 
-- Python 3.12+, async everywhere. No threads. (uv picked 3.14 for the local venv; nothing here is version-specific.)
+- Python 3.13 (pinned in `.python-version`), async everywhere. No threads.
 - No README by design; this file is the docs.
 - Keep `display/` framework-free. It must stay a static folder FastAPI can mount.
 - Add a new behaviour by adding a level to `Dreamer._dream`, not by branching on persona.
