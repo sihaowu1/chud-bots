@@ -35,7 +35,7 @@ class LaunchRequest(BaseModel):
         default_factory=list,
         description="Search phrases the dreamers will type; blank runs login only",
     )
-    count: int = Field(1, ge=1, le=1)
+    count: int = Field(1, ge=1, le=8)
 
 
 class OrchestrationRequest(BaseModel):

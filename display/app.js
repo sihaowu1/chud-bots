@@ -16,6 +16,9 @@ function connect() {
     const ev = JSON.parse(e.data);
     if (ev.kind === "snapshot") {
       $("#max-count").textContent = ev.max;
+      const count = $("#launch [name=count]");
+      count.max = ev.max;
+      if (Number(count.value) > ev.max) count.value = ev.max;
       ev.agents.forEach(render);
     } else if (ev.kind === "agent") {
       render(ev.agent);
