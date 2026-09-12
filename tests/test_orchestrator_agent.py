@@ -69,7 +69,9 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["assignments"][0]["id"], task["id"])
         self.assertIn("activity", state)
         self.assertNotIn("email", self.planner.contexts[0]["agents"][0])
-        self.assertIn("Safety and demo boundary", self.planner.contexts[0]["repository_instructions"])
+        repository_instructions = self.planner.contexts[0]["repository_instructions"]
+        self.assertTrue(repository_instructions.startswith("# agents.md"))
+        self.assertIn("## What this is", repository_instructions)
 
     async def test_activity_is_timestamped_and_triggers_next_phase(self):
         run = await self.orchestrator.start("Staged demo", selected_personas=["Cobb"])

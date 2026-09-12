@@ -26,8 +26,6 @@ adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
 implemented. Keep that distinction explicit when changing this document or
 presenting the project.
 
-# Safety and demo boundary 
-
 ## Layout
 
 ```
