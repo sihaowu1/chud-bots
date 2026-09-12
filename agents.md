@@ -17,6 +17,19 @@ different voices, interests, and browsing patterns make each agent legible on
 screen and illustrate how distributed online discussion can shape retrieval and
 summarization.
 
+### Safety and demo boundary
+
+Coordinated fake personas, undisclosed promotional posts, and attempts to
+manipulate Google or Reddit are deceptive and may violate both platforms'
+policies. Do not use this repository to create Reddit accounts, evade platform
+controls, publish coordinated spam, or manufacture real-world consensus.
+
+Run the posting portion only against fixtures, a mock Reddit community, or a
+private environment whose participants have consented. Any public-facing demo
+content must be clearly labeled as synthetic. Treat the desired AI Overview as
+a staged or measured demonstration outcome, never as a guaranteed ranking
+lever or a factual claim that the system may fabricate.
+
 ### Current implementation
 
 The code implements the earlier search-traffic prototype and a model-backed
