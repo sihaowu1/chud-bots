@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from backend import agent_state_store
-from backend.agent import REDDIT_SIGNUP_URL, Dreamer
+from backend.agent import REDDIT_LOGIN_URL, REDDIT_SIGNUP_URL, Dreamer
 from backend.personas import Persona
 
 
@@ -92,6 +92,68 @@ def dreamer():
 
 
 class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
+    async def test_complete_saved_credentials_go_directly_to_login(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={
+                    "email": {
+                        "address": "saved@example.com",
+                        "password": "saved-password",
+                    }
+                },
+            ),
+            patch.object(agent, "_login_reddit", new=AsyncMock()) as login,
+            patch.object(agent, "_ensure_email", new=AsyncMock()) as ensure_email,
+            patch.object(agent, "_prepare_reddit_signup", new=AsyncMock()) as signup,
+        ):
+            await agent._prepare_reddit_access(page)
+
+        login.assert_awaited_once_with(page, "saved@example.com", "saved-password")
+        ensure_email.assert_not_awaited()
+        signup.assert_not_awaited()
+        self.assertEqual(agent.state.email, "saved@example.com")
+
+    async def test_saved_credentials_are_submitted_on_reddit_login(self):
+        agent = dreamer()
+        identity_field = FakeField()
+        password_field = FakeField()
+        page = FakePage(identity_field, password_field=password_field)
+
+        with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
+            await agent._login_reddit(page, "saved@example.com", "saved-password")
+
+        self.assertEqual(page.visits, [REDDIT_LOGIN_URL])
+        self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
+        self.assertEqual(password_field.fill_calls, ["saved-password"])
+        self.assertEqual(page.submit_button.clicks, 1)
+        self.assertEqual(agent.state.note, "submitted saved Reddit login")
+        sleep.assert_awaited_once_with(3)
+
+    async def test_incomplete_credentials_keep_signup_flow(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={"email": {"address": None, "password": None}},
+            ),
+            patch.object(agent, "_login_reddit", new=AsyncMock()) as login,
+            patch.object(agent, "_ensure_email", new=AsyncMock()) as ensure_email,
+            patch.object(agent, "_prepare_reddit_signup", new=AsyncMock()) as signup,
+        ):
+            await agent._prepare_reddit_access(page)
+
+        login.assert_not_awaited()
+        ensure_email.assert_awaited_once_with(page)
+        signup.assert_awaited_once_with(page)
+
     async def test_blank_query_skips_search_flow(self):
         agent = dreamer()
         agent.state.query = "  "

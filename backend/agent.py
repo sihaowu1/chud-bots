@@ -22,6 +22,7 @@ from .personas import DWELL_DEEP, DWELL_LANDING, DWELL_SERP, Persona, dwell
 SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
 REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
+REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -97,8 +98,7 @@ class Dreamer:
                 browser = await pw.chromium.connect_over_cdp(session.websocket_url)
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
-                await self._ensure_email(page)
-                await self._prepare_reddit_signup(page)
+                await self._prepare_reddit_access(page)
                 await self._dream(page)
 
             self.state.status = "done"
@@ -117,6 +117,22 @@ class Dreamer:
                 self._emit()
 
     # ---- the dream -------------------------------------------------------
+
+    async def _prepare_reddit_access(self, page: Page) -> None:
+        """Log in with complete saved credentials, otherwise run signup."""
+        saved = agent_state_store.load_or_create(self.persona.name)
+        email = saved.get("email")
+        address = email.get("address") if isinstance(email, dict) else None
+        password = email.get("password") if isinstance(email, dict) else None
+
+        if isinstance(address, str) and address and isinstance(password, str) and password:
+            self.state.email = address
+            self._emit(note=f"using saved email {address}")
+            await self._login_reddit(page, address, password)
+            return
+
+        await self._ensure_email(page)
+        await self._prepare_reddit_signup(page)
 
     async def _ensure_email(self, page: Page) -> None:
         """Load this persona's saved email or obtain one from Temp-Mail."""
@@ -241,6 +257,40 @@ class Dreamer:
         ).first
         await submit.click()
         self._emit(note="submitted Reddit credentials", url=page.url)
+
+    async def _login_reddit(self, page: Page, address: str, password: str) -> None:
+        """Submit a saved email and password through Reddit's login page."""
+        self._check_stop()
+        self._emit(note="opening Reddit login", url=REDDIT_LOGIN_URL)
+        await page.goto(REDDIT_LOGIN_URL, wait_until="domcontentloaded")
+
+        identity_field = page.locator(
+            'input[name="username"], input[name="email"], input[type="email"], '
+            'input[autocomplete="username"]'
+        ).first
+        try:
+            await identity_field.wait_for(state="visible", timeout=15_000)
+        except Exception:
+            identity_field = page.get_by_role(
+                "textbox", name=re.compile(r"username|email", re.IGNORECASE)
+            ).first
+            await identity_field.wait_for(state="visible", timeout=10_000)
+
+        password_field = page.locator(
+            'input[name="password"], input[type="password"], '
+            'input[autocomplete="current-password"]'
+        ).first
+        await password_field.wait_for(state="visible", timeout=15_000)
+
+        await identity_field.fill(address)
+        await password_field.fill(password)
+        submit = page.get_by_role(
+            "button", name=re.compile(r"log\s*in|continue", re.IGNORECASE)
+        ).first
+        await submit.click()
+        self._emit(note="submitted saved Reddit login", url=page.url)
+        await asyncio.sleep(3)
+        self._check_stop()
 
     async def _dream(self, page: Page) -> None:
         if not self.state.query.strip():
