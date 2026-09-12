@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]",
     "playwright==1.62.0",
     "python-dotenv",
+    "httpx==0.28.1",
 ]
 
 [tool.uv]

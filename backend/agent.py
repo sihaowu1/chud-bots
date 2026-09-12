@@ -20,6 +20,7 @@ from .personas import DWELL_DEEP, DWELL_LANDING, DWELL_SERP, Persona, dwell
 
 SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
+REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -66,6 +67,7 @@ class Dreamer:
         )
         self._stop = asyncio.Event()
         self.task: asyncio.Task | None = None
+        self._email_copied = False
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -95,6 +97,7 @@ class Dreamer:
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
                 await self._ensure_email(page)
+                await self._prepare_reddit_signup(page)
                 await self._dream(page)
 
             self.state.status = "done"
@@ -145,10 +148,59 @@ class Dreamer:
                 timeout=30_000,
             )
             self.state.email = str(await handle.json_value())
+            await self._copy_email(page, self.state.email)
             email["address"] = self.state.email
             email.setdefault("login", None)
             agent_state_store.save(self.persona.name, saved)
             self._emit(note=f"saved email {self.state.email}", url=page.url)
+
+    async def _copy_email(self, page: Page, address: str) -> None:
+        """Copy the generated address through the browser's real clipboard."""
+        inputs = page.locator("#mail, input.emailbox-input, input")
+        for index in range(await inputs.count()):
+            candidate = inputs.nth(index)
+            try:
+                if (await candidate.input_value()).strip() != address:
+                    continue
+                await candidate.click()
+                await candidate.press("Control+A")
+                await candidate.press("Control+C")
+                self._email_copied = True
+                self._emit(note="copied Temp-Mail address", url=page.url)
+                return
+            except Exception:  # noqa: BLE001 - another matching input may work
+                continue
+
+    async def _prepare_reddit_signup(self, page: Page) -> None:
+        """Put the persona email into Reddit's first signup step without submitting."""
+        if not self.state.email:
+            raise RuntimeError("cannot prepare Reddit signup without an email address")
+
+        self._check_stop()
+        self._emit(note="opening Reddit signup", url=REDDIT_SIGNUP_URL)
+        await page.goto(REDDIT_SIGNUP_URL, wait_until="domcontentloaded")
+
+        field = page.locator(
+            'input[name="email"], input[type="email"], input[autocomplete="email"]'
+        ).first
+        try:
+            await field.wait_for(state="visible", timeout=15_000)
+        except Exception:
+            field = page.get_by_role("textbox", name="Email", exact=True).first
+            await field.wait_for(state="visible", timeout=10_000)
+
+        await field.click()
+        if self._email_copied:
+            await field.press("Control+V")
+
+        # Clipboard support can vary by remote-browser image. Filling is a safe
+        # fallback and also handles addresses loaded from persistent state.
+        if (await field.input_value()).strip() != self.state.email:
+            await field.fill(self.state.email)
+
+        if (await field.input_value()).strip() != self.state.email:
+            raise RuntimeError("Reddit email field did not retain the Temp-Mail address")
+        self._emit(note="pasted email into Reddit signup (not submitted)", url=page.url)
 
     async def _dream(self, page: Page) -> None:
         await self._search(page)

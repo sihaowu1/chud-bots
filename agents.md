@@ -32,9 +32,10 @@ lever or a factual claim that the system may fabricate.
 
 ### Current implementation
 
-The code currently implements the earlier search-traffic prototype: each
-"dreamer" searches Google, opens a target result, and browses it. Reddit persona
-authoring/posting and AI Overview evaluation are product direction, not yet
+The code implements the earlier search-traffic prototype and a model-backed
+campaign coordinator. The coordinator reads this file and the durable agent
+ledgers, then assigns `create_post`, `comment`, or `wait` tasks. Executor
+adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
 implemented. Keep that distinction explicit when changing this document or
 presenting the project.
 
@@ -61,6 +62,8 @@ is the only file that imports the Steel SDK.
 | `steel_client.py`| Thin wrapper over `steel-sdk`: create / release / list sessions. |
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
+| `orchestrator_agent.py` | GPT-backed campaign task planning, continuation, and durable run audit. It does not post. |
+| `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
 
 ### display/
 
@@ -103,6 +106,24 @@ to Steel's browser over CDP, so `playwright install` is not required.
 | POST   | `/api/clear`              | drops finished/failed/stopped agents from the registry |
 | GET    | `/api/steel/sessions`     | live sessions straight from Steel (sanity check) |
 | GET    | `/api/events`             | SSE. First message is `{kind:"snapshot"}`, then `agent` / `log` events |
+| POST   | `/api/orchestrations`     | `{prompt, personas?, environment}` -> first task-plan phase |
+| GET    | `/api/orchestrations/{id}` | durable plan, activity, and agent-ledger snapshot |
+| POST   | `/api/orchestrations/{id}/continue` | re-plan from the latest ledgers |
+| POST   | `/api/orchestrations/{id}/activity` | executor callback; records username/content/URLs/timestamps and re-plans by default |
+
+## Campaign coordinator
+
+Set `OPENAI_API_KEY`, then send the user's campaign prompt to
+`POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium
+reasoning by default; both values can be overridden with
+`ORCHESTRATOR_MODEL` and `ORCHESTRATOR_REASONING_EFFORT`.
+
+Each phase produces assignments only. A future mock/private-environment adapter
+executes them and reports results through the activity endpoint. Every persona
+has a JSON ledger under `backend/agent_states/` containing its Reddit username,
+assignments, and timestamped post/comment/wait activity. Each orchestration also
+has an aggregate JSON audit under `backend/orchestrator_runs/`. Credentials are
+kept out of the context sent to the model.
 
 ## Steel specifics that bit us
 

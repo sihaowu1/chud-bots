@@ -2,7 +2,9 @@
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from . import config
 
@@ -25,6 +27,9 @@ def load_or_create(persona: str) -> dict:
 
     state.setdefault("persona", persona)
     state.setdefault("email", {"address": None, "login": None})
+    state.setdefault("reddit", {"username": None})
+    state.setdefault("assignments", [])
+    state.setdefault("activity", [])
     return state
 
 
@@ -39,12 +44,58 @@ def save(persona: str, state: dict) -> None:
 
 def _blank_state(persona: str) -> dict:
     return {
+        "schema_version": 1,
         "persona": persona,
         "email": {
             "address": None,
             "login": None,
         },
+        "reddit": {"username": None},
+        "assignments": [],
+        "activity": [],
     }
+
+
+def append_assignment(persona: str, assignment: dict[str, Any]) -> dict:
+    """Persist an orchestrator assignment in this persona's durable ledger."""
+    state = load_or_create(persona)
+    item = dict(assignment)
+    item.setdefault("assigned_at", _timestamp())
+    state["assignments"].append(item)
+    save(persona, state)
+    return item
+
+
+def append_activity(
+    persona: str,
+    activity: dict[str, Any],
+    *,
+    reddit_username: str | None = None,
+) -> dict:
+    """Persist an adapter callback (post, comment, wait, or system event)."""
+    state = load_or_create(persona)
+    if reddit_username:
+        state["reddit"]["username"] = reddit_username
+    item = dict(activity)
+    item.setdefault("timestamp", _timestamp())
+    state["activity"].append(item)
+    save(persona, state)
+    return item
+
+
+def public_ledger(persona: str) -> dict:
+    """Return planning context without leaking email/login credentials to the model."""
+    state = load_or_create(persona)
+    return {
+        "persona": state["persona"],
+        "reddit_username": state["reddit"].get("username"),
+        "assignments": state["assignments"],
+        "activity": state["activity"],
+    }
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _path_for(persona: str) -> Path:

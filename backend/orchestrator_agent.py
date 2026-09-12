@@ -1,0 +1,366 @@
+"""Model-backed coordinator for assigning social-demo work to dreamers.
+
+This module plans work and records adapter callbacks. It deliberately contains
+no Reddit automation: another component may execute assignments only against a
+mock community or a private, consented environment.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Protocol
+
+import httpx
+
+from . import agent_state_store, config, events, personas
+
+ALLOWED_ACTIONS = {"create_post", "comment", "wait"}
+ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
+ALLOWED_ACTIVITY_STATUSES = {"started", "completed", "failed", "cancelled"}
+
+_PLAN_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["summary", "assignments"],
+    "properties": {
+        "summary": {"type": "string"},
+        "assignments": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["persona", "action", "instructions", "target_url", "wait_for"],
+                "properties": {
+                    "persona": {"type": "string"},
+                    "action": {"type": "string", "enum": sorted(ALLOWED_ACTIONS)},
+                    "instructions": {"type": "string"},
+                    "target_url": {"type": ["string", "null"]},
+                    "wait_for": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    },
+}
+
+_SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for a staged social-media demo.
+Read and obey the supplied repository instructions. Assign the smallest useful next step to
+each selected synthetic persona. The only actions are create_post, comment, and wait.
+
+Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
+invent a completed URL, username, post, or comment: only activity ledger entries are facts.
+Do not assign duplicate work that is already completed or in progress. Keep persona voices
+distinct, but do not write final post/comment copy; give concise execution instructions.
+
+This planner may operate only in a mock environment or a private environment whose
+participants consented. All content must be labeled synthetic. Never plan public coordinated
+posting, platform-control evasion, spam, or manufactured consensus. If the request conflicts
+with that boundary, assign a wait task explaining what operator confirmation or environment
+change is required.
+"""
+
+
+class Planner(Protocol):
+    async def plan(self, context: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class OpenAIResponsesPlanner:
+    """Small Responses API client with strict structured output."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        self.api_key = api_key if api_key is not None else config.OPENAI_API_KEY
+        self.model = model or config.ORCHESTRATOR_MODEL
+        self.reasoning_effort = reasoning_effort or config.ORCHESTRATOR_REASONING_EFFORT
+        self.base_url = (base_url or config.OPENAI_BASE_URL).rstrip("/")
+
+    async def plan(self, context: dict[str, Any]) -> dict[str, Any]:
+        if not self.api_key:
+            raise OrchestratorConfigurationError("OPENAI_API_KEY is required for orchestration")
+
+        payload = {
+            "model": self.model,
+            "reasoning": {"effort": self.reasoning_effort},
+            "instructions": _SYSTEM_INSTRUCTIONS,
+            "input": json.dumps(context, ensure_ascii=False),
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "dreamer_task_plan",
+                    "strict": True,
+                    "schema": _PLAN_SCHEMA,
+                }
+            },
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(f"{self.base_url}/responses", headers=headers, json=payload)
+        if response.is_error:
+            detail = response.text[:500]
+            raise OrchestratorModelError(f"Responses API returned {response.status_code}: {detail}")
+
+        raw = response.json()
+        output_text = _response_output_text(raw)
+        try:
+            return json.loads(output_text)
+        except json.JSONDecodeError as exc:
+            raise OrchestratorModelError("orchestrator returned invalid JSON") from exc
+
+
+class CampaignOrchestrator:
+    """Creates runs, advances phases, and owns the durable coordination audit."""
+
+    def __init__(self, planner: Planner | None = None, runs_dir: Path | None = None) -> None:
+        self.planner = planner or OpenAIResponsesPlanner()
+        self.runs_dir = runs_dir or config.ORCHESTRATOR_RUNS_DIR
+        self._lock = asyncio.Lock()
+
+    async def start(
+        self,
+        prompt: str,
+        *,
+        selected_personas: list[str] | None = None,
+        environment: str = "mock",
+    ) -> dict[str, Any]:
+        names = self._validate_personas(selected_personas or personas.names())
+        if environment not in {"mock", "private"}:
+            raise ValueError("environment must be 'mock' or 'private'")
+        now = _timestamp()
+        run = {
+            "schema_version": 1,
+            "id": uuid.uuid4().hex[:12],
+            "prompt": prompt,
+            "environment": environment,
+            "status": "planning",
+            "model": config.ORCHESTRATOR_MODEL,
+            "reasoning_effort": config.ORCHESTRATOR_REASONING_EFFORT,
+            "personas": names,
+            "created_at": now,
+            "updated_at": now,
+            "phases": [],
+            "events": [],
+            "agent_ledgers": {},
+        }
+        async with self._lock:
+            self._save(run)
+        return await self._advance(run)
+
+    async def continue_run(self, run_id: str) -> dict[str, Any]:
+        async with self._lock:
+            run = self._load(run_id)
+            run["status"] = "planning"
+            self._save(run)
+        return await self._advance(run)
+
+    async def record_activity(
+        self,
+        run_id: str,
+        *,
+        persona: str,
+        task_id: str,
+        kind: str,
+        status: str,
+        content: str | None = None,
+        url: str | None = None,
+        parent_url: str | None = None,
+        reddit_username: str | None = None,
+        note: str | None = None,
+        continue_after: bool = True,
+    ) -> dict[str, Any]:
+        if kind not in ALLOWED_ACTIVITY_KINDS:
+            raise ValueError(f"kind must be one of {sorted(ALLOWED_ACTIVITY_KINDS)}")
+        if status not in ALLOWED_ACTIVITY_STATUSES:
+            raise ValueError(f"status must be one of {sorted(ALLOWED_ACTIVITY_STATUSES)}")
+        if kind in {"post", "comment"} and status == "completed":
+            if not content or not url or not reddit_username:
+                raise ValueError(
+                    "completed post/comment activity requires content, url, and reddit_username"
+                )
+
+        async with self._lock:
+            run = self._load(run_id)
+            if persona not in run["personas"]:
+                raise ValueError(f"persona {persona!r} is not part of run {run_id}")
+            known_tasks = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
+            if task_id not in known_tasks:
+                raise ValueError(f"unknown task_id {task_id!r}")
+            activity = {
+                "id": uuid.uuid4().hex[:12],
+                "run_id": run_id,
+                "task_id": task_id,
+                "kind": kind,
+                "status": status,
+                "content": content,
+                "url": url,
+                "parent_url": parent_url,
+                "note": note,
+                "timestamp": _timestamp(),
+            }
+            agent_state_store.append_activity(
+                persona, activity, reddit_username=reddit_username
+            )
+            run["events"].append({"type": "agent_activity", "persona": persona, **activity})
+            run["updated_at"] = _timestamp()
+            run["status"] = "planning" if continue_after else "active"
+            self._save(run)
+            events.publish("log", msg=f"{persona} reported {kind} {status} for {task_id}")
+
+        return await self._advance(run) if continue_after else run
+
+    def get(self, run_id: str) -> dict[str, Any]:
+        return self._load(run_id)
+
+    async def _advance(self, run: dict[str, Any]) -> dict[str, Any]:
+        context = self._context(run)
+        try:
+            proposal = await self.planner.plan(context)
+            assignments = self._validate_plan(proposal, run)
+        except Exception:
+            async with self._lock:
+                latest = self._load(run["id"])
+                latest["status"] = "failed"
+                latest["updated_at"] = _timestamp()
+                self._save(latest)
+            raise
+
+        async with self._lock:
+            latest = self._load(run["id"])
+            phase_number = len(latest["phases"]) + 1
+            timestamp = _timestamp()
+            persisted = []
+            for index, assignment in enumerate(assignments, start=1):
+                task = {
+                    "id": f"{latest['id']}-p{phase_number}-t{index}",
+                    "run_id": latest["id"],
+                    "phase": phase_number,
+                    "assigned_at": timestamp,
+                    **assignment,
+                }
+                agent_state_store.append_assignment(task["persona"], task)
+                persisted.append(task)
+            latest["phases"].append(
+                {
+                    "number": phase_number,
+                    "created_at": timestamp,
+                    "summary": proposal["summary"],
+                    "assignments": persisted,
+                }
+            )
+            latest["events"].append(
+                {"type": "plan_created", "phase": phase_number, "timestamp": timestamp}
+            )
+            latest["status"] = "active"
+            latest["updated_at"] = timestamp
+            self._save(latest)
+            for task in persisted:
+                events.publish("orchestrator", run_id=latest["id"], assignment=task)
+            return latest
+
+    def _context(self, run: dict[str, Any]) -> dict[str, Any]:
+        try:
+            repository_instructions = config.AGENTS_INSTRUCTIONS_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise OrchestratorConfigurationError(f"could not read agents.md: {exc}") from exc
+        return {
+            "repository_instructions": repository_instructions,
+            "user_prompt": run["prompt"],
+            "environment": run["environment"],
+            "run_id": run["id"],
+            "previous_phases": run["phases"],
+            "agents": [agent_state_store.public_ledger(name) for name in run["personas"]],
+        }
+
+    def _validate_plan(self, plan: dict[str, Any], run: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(plan, dict) or not isinstance(plan.get("summary"), str):
+            raise OrchestratorModelError("plan must contain a summary")
+        raw_assignments = plan.get("assignments")
+        if not isinstance(raw_assignments, list) or not raw_assignments:
+            raise OrchestratorModelError("plan must contain at least one assignment")
+        assignments = []
+        for item in raw_assignments:
+            if not isinstance(item, dict) or item.get("persona") not in run["personas"]:
+                raise OrchestratorModelError("plan referenced an unknown persona")
+            if item.get("action") not in ALLOWED_ACTIONS:
+                raise OrchestratorModelError("plan returned an unsupported action")
+            if not isinstance(item.get("instructions"), str) or not item["instructions"].strip():
+                raise OrchestratorModelError("assignment instructions cannot be empty")
+            wait_for = item.get("wait_for")
+            if not isinstance(wait_for, list) or not all(isinstance(value, str) for value in wait_for):
+                raise OrchestratorModelError("wait_for must be a list of task IDs")
+            assignments.append(
+                {
+                    "persona": item["persona"],
+                    "action": item["action"],
+                    "instructions": item["instructions"].strip(),
+                    "target_url": item.get("target_url"),
+                    "wait_for": wait_for,
+                }
+            )
+        return assignments
+
+    def _validate_personas(self, requested: list[str]) -> list[str]:
+        available = set(personas.names())
+        names = list(dict.fromkeys(requested))
+        unknown = [name for name in names if name not in available]
+        if unknown:
+            raise ValueError(f"unknown personas: {', '.join(unknown)}")
+        if not names:
+            raise ValueError("at least one persona is required")
+        return names
+
+    def _path(self, run_id: str) -> Path:
+        if not run_id or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-" for ch in run_id.lower()):
+            raise ValueError("invalid run id")
+        return self.runs_dir / f"{run_id}.json"
+
+    def _load(self, run_id: str) -> dict[str, Any]:
+        path = self._path(run_id)
+        if not path.exists():
+            raise KeyError(run_id)
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise RuntimeError(f"could not read orchestrator run {run_id}: {exc}") from exc
+        return value
+
+    def _save(self, run: dict[str, Any]) -> None:
+        run["agent_ledgers"] = {
+            name: agent_state_store.public_ledger(name) for name in run["personas"]
+        }
+        path = self._path(run["id"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(run, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+
+class OrchestratorConfigurationError(RuntimeError):
+    pass
+
+
+class OrchestratorModelError(RuntimeError):
+    pass
+
+
+def _response_output_text(response: dict[str, Any]) -> str:
+    for item in response.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                return content["text"]
+    raise OrchestratorModelError("orchestrator response did not contain output text")
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()

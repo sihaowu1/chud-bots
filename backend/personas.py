@@ -41,5 +41,10 @@ def pick(n: int) -> list[Persona]:
     return out
 
 
+def names() -> list[str]:
+    """Stable persona names available to the campaign coordinator."""
+    return [persona.name for persona in _POOL]
+
+
 def dwell(rng: tuple[float, float]) -> float:
     return random.uniform(*rng)
