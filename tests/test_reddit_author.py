@@ -99,6 +99,7 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.author._open = AsyncMock()
         post = {"name": "t3_abc", "subreddit": "HackathonsCanada"}
         data = {"name": "t1_new", "parent_id": "t3_abc", "author": "test-user",
+                "subreddit": "HackathonsCanada",
                 "body": disclosed_body("Reply", 10_000),
                 "permalink": "/r/HackathonsCanada/comments/abc/question/new/"}
         before = [{"data": {"children": [{"data": post}]}}, {"data": {"children": []}}]
@@ -110,8 +111,79 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.page.locator.return_value.last.click = AsyncMock()
         with patch("backend.reddit_author.agent_state_store.append_activity"):
             result = await self.author.comment("https://www.reddit.com/r/HackathonsCanada/comments/abc/question/", "Reply", request_id="reply")
+            cached = await self.author.comment("https://www.reddit.com/r/HackathonsCanada/comments/abc/question/", "Reply", request_id="reply")
+        self.assertEqual(cached, result)
         self.assertEqual(result["reddit_id"], "t1_new")
         editor.get_by_role.return_value.click.assert_awaited_once()
+
+    def _uncertain_comment(self):
+        payload = {"action": "comment", "subreddit": "HackathonsCanada",
+                   "post_url": "https://www.reddit.com/r/HackathonsCanada/comments/abc/question/",
+                   "body": disclosed_body("Reply", 10_000), "request_id": "reply"}
+        path = self.author._receipt_path("reply")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"status": "uncertain", "payload": payload,
+                                    "reddit_username": "test-user"}), encoding="utf-8")
+        data = {"name": "t1_new", "parent_id": "t3_abc", "author": "test-user",
+                "subreddit": "HackathonsCanada", "body": payload["body"],
+                "permalink": "/r/HackathonsCanada/comments/abc/question/new/"}
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._json = AsyncMock(return_value={"data": {"children": [{"data": data}]}})
+        return path, data
+
+    async def test_comment_recovery_is_read_only_and_repeatable(self):
+        path, _ = self._uncertain_comment()
+        with patch("backend.reddit_author.agent_state_store.append_activity") as activity:
+            result = await self.author.reconcile_comment("reply", "t1_new")
+            cached = await self.author.reconcile_comment("reply", "t1_new")
+        self.assertEqual(result, cached)
+        self.assertEqual(json.loads(path.read_text())["status"], "confirmed")
+        activity.assert_called_once()
+        self.author._json.assert_awaited_once()
+        self.assertEqual(self.page.mock_calls, [])
+
+    async def test_comment_recovery_rejects_wrong_content_identity_or_target(self):
+        for field, value in (("author", "someone-else"), ("body", "different reply"),
+                             ("parent_id", "t3_other"), ("parent_id", "t1_reply"),
+                             ("subreddit", "other"), ("name", "t1_other")):
+            with self.subTest(field=field, value=value):
+                path, data = self._uncertain_comment()
+                data[field] = value
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    await self.author.reconcile_comment("reply", "t1_new")
+                self.assertEqual(json.loads(path.read_text())["status"], "uncertain")
+        self.assertEqual(self.page.mock_calls, [])
+
+    async def test_comment_recovery_rejects_different_signed_in_account(self):
+        self._uncertain_comment()
+        self.author._identity.return_value = "different-user"
+        with self.assertRaisesRegex(RuntimeError, "original submission"):
+            await self.author.reconcile_comment("reply", "t1_new")
+        self.author._json.assert_not_awaited()
+
+    async def test_comment_recovery_does_not_replace_confirmed_id(self):
+        self._uncertain_comment()
+        with patch("backend.reddit_author.agent_state_store.append_activity"):
+            await self.author.reconcile_comment("reply", "t1_new")
+        with self.assertRaisesRegex(ValueError, "another comment ID"):
+            await self.author.reconcile_comment("reply", "t1_other")
+
+    async def test_uncertain_comment_blocks_resubmission(self):
+        self._uncertain_comment()
+        with self.assertRaisesRegex(RuntimeError, "uncertain"):
+            await self.author.comment("https://www.reddit.com/r/HackathonsCanada/comments/abc/question/", "Reply", request_id="reply")
+        self.author._identity.assert_not_awaited()
+        self.assertEqual(self.page.mock_calls, [])
+
+    async def test_locked_or_archived_post_blocks_comment_composer(self):
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._open = AsyncMock()
+        for field in ("locked", "archived"):
+            post = {"name": "t3_abc", "subreddit": "HackathonsCanada", field: True}
+            self.author._json = AsyncMock(return_value=[{"data": {"children": [{"data": post}]}}])
+            with self.assertRaisesRegex(RuntimeError, "locked, or archived"):
+                await self.author.comment("https://www.reddit.com/r/HackathonsCanada/comments/abc/question/", "Reply", request_id="reply")
+        self.assertEqual(self.page.mock_calls, [])
 
     async def test_stop_prevents_claim_and_click(self):
         path, _ = self.author._receipt("one", {"action": "comment"})

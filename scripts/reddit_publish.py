@@ -37,8 +37,10 @@ async def publish(args):
                     result = await author.create_post(args.title, args.body, request_id=args.request_id)
                 elif args.action == "comment":
                     result = await author.comment(args.post_url, args.body, request_id=args.request_id)
-                else:
+                elif args.action == "reconcile-post":
                     result = await author.reconcile_post(args.request_id, args.post_id)
+                else:
+                    result = await author.reconcile_comment(args.request_id, args.comment_id)
                 print(json.dumps(result, indent=2), flush=True)
                 output = Path(__file__).resolve().parent / "reddit-check"
                 output.mkdir(exist_ok=True)
@@ -64,4 +66,6 @@ if __name__ == "__main__":
     comment.add_argument("--body", required=True)
     reconcile = sub.add_parser("reconcile-post", help="Verify an existing post without submitting again")
     reconcile.add_argument("--post-id", required=True)
+    reconcile_comment = sub.add_parser("reconcile-comment", help="Verify an existing comment without submitting again")
+    reconcile_comment.add_argument("--comment-id", required=True)
     asyncio.run(publish(parser.parse_args()))

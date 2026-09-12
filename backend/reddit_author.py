@@ -46,11 +46,14 @@ class RedditAuthor:
         self.page = page
         self.dry_run = dry_run
 
-    def _receipt(self, key: str, payload: dict) -> tuple[Path, dict | None]:
+    def _receipt_path(self, key: str) -> Path:
         if not key.strip() or len(key) > 200:
             raise ValueError("request_id must contain 1 to 200 characters")
         digest = hashlib.sha256((self.dreamer.persona.name + "\0" + key).encode()).hexdigest()
-        path = config.AGENT_STATES_DIR / "reddit_receipts" / (digest + ".json")
+        return config.AGENT_STATES_DIR / "reddit_receipts" / (digest + ".json")
+
+    def _receipt(self, key: str, payload: dict) -> tuple[Path, dict | None]:
+        path = self._receipt_path(key)
         if path.exists():
             receipt = json.loads(path.read_text(encoding="utf-8"))
             if receipt["payload"] != payload:
@@ -107,8 +110,7 @@ class RedditAuthor:
         """Read-only recovery of an uncertain post using its observed Reddit ID."""
         if not re.fullmatch(r"t3_[a-z0-9]+", post_id):
             raise ValueError("Expected a Reddit post ID such as t3_abc123")
-        digest = hashlib.sha256((self.dreamer.persona.name + "\0" + request_id).encode()).hexdigest()
-        path = config.AGENT_STATES_DIR / "reddit_receipts" / (digest + ".json")
+        path = self._receipt_path(request_id)
         receipt = json.loads(path.read_text(encoding="utf-8"))
         if receipt["payload"]["action"] != "create_post":
             raise ValueError("This receipt is not a post")
@@ -121,6 +123,43 @@ class RedditAuthor:
             raise RuntimeError("Existing post does not match the requested author/title/body/community")
         data = children[0]["data"]
         result = self._post_result(data, username)
+        self._confirm(path, receipt, result, username)
+        return result
+
+    @staticmethod
+    def _matches_comment(data: dict, payload: dict, username: str) -> bool:
+        post_id = "t3_" + urlsplit(payload["post_url"]).path.split("/")[4]
+        return (data.get("author") == username
+                and data.get("body", "").strip() == payload["body"]
+                and data.get("parent_id") == post_id
+                and data.get("subreddit", "").casefold() == COMMUNITY.casefold())
+
+    @staticmethod
+    def _comment_result(data: dict, username: str) -> dict:
+        return {"url": ORIGIN + data["permalink"],
+                "reddit_id": data["name"], "reddit_username": username}
+
+    async def reconcile_comment(self, request_id: str, comment_id: str) -> dict:
+        """Verify an uncertain comment by ID without submitting another reply."""
+        if not re.fullmatch(r"t1_[a-z0-9]+", comment_id):
+            raise ValueError("Expected a Reddit comment ID such as t1_abc123")
+        path = self._receipt_path(request_id)
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        if receipt["payload"]["action"] != "comment":
+            raise ValueError("This receipt is not a comment")
+        if receipt["status"] == "confirmed":
+            if receipt["result"]["reddit_id"] != comment_id:
+                raise ValueError("request_id is already confirmed with another comment ID")
+            return receipt["result"]
+        username = await self._identity()
+        if username != receipt["reddit_username"]:
+            raise RuntimeError("Signed-in identity differs from the original submission")
+        listing = await self._json(f"{ORIGIN}/api/info.json?id={comment_id}")
+        children = listing["data"]["children"]
+        if (len(children) != 1 or children[0]["data"].get("name") != comment_id
+                or not self._matches_comment(children[0]["data"], receipt["payload"], username)):
+            raise RuntimeError("Existing comment does not match the requested author/body/post/community")
+        result = self._comment_result(children[0]["data"], username)
         self._confirm(path, receipt, result, username)
         return result
 
@@ -195,7 +234,7 @@ class RedditAuthor:
             return cached
         username = await self._identity()
         await self._open(url)
-        before = await self._json(url + ".json?limit=500")
+        before = await self._json(url + ".json?limit=500&sort=new")
         post = before[0]["data"]["children"][0]["data"]
         if post.get("subreddit", "").casefold() != COMMUNITY.casefold() or post.get("locked") or post.get("archived"):
             raise RuntimeError("Post is outside the test subreddit, locked, or archived")
@@ -211,11 +250,8 @@ class RedditAuthor:
                     listing = await self._json(url + ".json?limit=500&sort=new")
                     for child in listing[1]["data"]["children"]:
                         data = child["data"]
-                        if (data.get("name") not in existing and data.get("author") == username
-                                and data.get("body", "").strip() == body
-                                and data.get("parent_id") == post["name"]):
-                            return {"url": ORIGIN + data["permalink"],
-                                    "reddit_id": data["name"], "reddit_username": username}
+                        if data.get("name") not in existing and self._matches_comment(data, payload, username):
+                            return self._comment_result(data, username)
                     await asyncio.sleep(2)
 
         return await self._submit(path, payload, username,

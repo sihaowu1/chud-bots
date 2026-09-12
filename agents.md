@@ -188,8 +188,22 @@ uv run python scripts/reddit_publish.py --persona Cobb --request-id question-001
 Confirmed submissions also enter the persona activity ledger. Screenshots are
 saved to `scripts/reddit-check/`. Confirmation means Reddit saved the content;
 moderation can still filter it, and results include `removed_by_category` for posts.
-Comments currently support top-level replies to post permalinks only. Uncertain
-comment receipts require manual inspection; there is no automatic resubmission.
+Comments currently support top-level replies to post permalinks only. Reuse the
+same request ID, post URL, and body to retrieve the existing confirmed comment.
+If a submission is uncertain, inspect Reddit for the comment first, then verify
+its ID without submitting another reply:
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Arthur --request-id reply-001 reconcile-comment --comment-id t1_COMMENT_ID
+```
+
+Reconciliation checks the original account, exact body, parent post, and community
+before confirming the receipt. If the comment cannot be found or verified, the
+receipt stays uncertain and blocks resubmission. There is no automatic retry of
+the submit click. Comment verification/recovery is covered with mocked Reddit
+responses (`uv run python -m unittest discover -s tests -p test_reddit_author.py`);
+a live comment submission has not been tested.
+
 Call `RedditAuthor(dreamer, page).create_post(...)` or `.comment(...)` to reuse
 the adapter in an existing authenticated Steel session. Serialize publishing
 operations for each persona/profile; different request IDs are independent.
