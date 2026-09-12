@@ -70,6 +70,7 @@ class FakePage:
         self.continue_button = FakeButton()
         self.submit_button = FakeButton()
         self.visits = []
+        self.button_name_patterns = []
 
     async def goto(self, url, **_kwargs):
         self.url = url
@@ -83,6 +84,7 @@ class FakePage:
     def get_by_role(self, role, *_args, **kwargs):
         if role == "button":
             pattern = kwargs["name"].pattern
+            self.button_name_patterns.append(pattern)
             return self.continue_button if "next" in pattern else self.submit_button
         return self.field
 
@@ -132,6 +134,7 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
         self.assertEqual(password_field.fill_calls, ["saved-password"])
         self.assertEqual(page.submit_button.clicks, 1)
+        self.assertEqual(page.button_name_patterns, [r"^\s*log\s*in\s*$"])
         self.assertEqual(agent.state.note, "submitted saved Reddit login")
         sleep.assert_awaited_once_with(3)
 
@@ -171,6 +174,37 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(status.await_count, 2)
         solve.assert_awaited_once_with("session-123", url=REDDIT_LOGIN_URL)
+        self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
+        self.assertEqual(password_field.fill_calls, ["saved-password"])
+
+    async def test_undetected_captcha_status_does_not_block_login_fields(self):
+        agent = dreamer()
+        agent.state.session = {"id": "session-123"}
+        identity_field = FakeField()
+        password_field = FakeField()
+        page = FakePage(identity_field, password_field=password_field)
+        no_captcha = [
+            {
+                "isSolvingCaptcha": False,
+                "tasks": [{"status": "undetected"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+
+        with (
+            patch(
+                "backend.agent.steel_client.captcha_status",
+                new=AsyncMock(return_value=no_captcha),
+            ) as status,
+            patch(
+                "backend.agent.steel_client.solve_captcha", new=AsyncMock()
+            ) as solve,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._login_reddit(page, "saved@example.com", "saved-password")
+
+        status.assert_awaited_once_with("session-123")
+        solve.assert_not_awaited()
         self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
         self.assertEqual(password_field.fill_calls, ["saved-password"])
 
@@ -263,12 +297,14 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
             patch.object(agent, "_search", new=AsyncMock()) as search,
             patch.object(agent, "_land", new=AsyncMock()) as land,
             patch.object(agent, "_deepen", new=AsyncMock()) as deepen,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep,
         ):
             await agent._dream(page)
 
         search.assert_not_awaited()
         land.assert_not_awaited()
         deepen.assert_not_awaited()
+        sleep.assert_awaited_once_with(10)
         self.assertEqual(agent.state.level, 0)
         self.assertEqual(agent.state.note, "login-only run complete")
 

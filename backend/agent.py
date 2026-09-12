@@ -23,9 +23,9 @@ SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
 REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
 REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
-CAPTCHA_DETECTION_TIMEOUT_SECONDS = 5
 CAPTCHA_SOLVE_TIMEOUT_SECONDS = 60
 CAPTCHA_POLL_INTERVAL_SECONDS = 1
+LOGIN_ONLY_DWELL_SECONDS = 10
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -289,7 +289,7 @@ class Dreamer:
         await identity_field.fill(address)
         await password_field.fill(password)
         submit = page.get_by_role(
-            "button", name=re.compile(r"log\s*in|continue", re.IGNORECASE)
+            "button", name=re.compile(r"^\s*log\s*in\s*$", re.IGNORECASE)
         ).first
         await submit.click()
         self._emit(note="submitted saved Reddit login", url=page.url)
@@ -303,17 +303,9 @@ class Dreamer:
             # Direct unit-level calls do not have a live Steel session.
             return
 
-        detection_deadline = (
-            asyncio.get_running_loop().time() + CAPTCHA_DETECTION_TIMEOUT_SECONDS
-        )
-        captcha_states = []
-        while asyncio.get_running_loop().time() < detection_deadline:
-            self._check_stop()
-            states = await steel_client.captcha_status(session_id)
-            captcha_states = [state for state in states if _captcha_tasks(state)]
-            if captcha_states:
-                break
-            await asyncio.sleep(CAPTCHA_POLL_INTERVAL_SECONDS)
+        self._check_stop()
+        states = await steel_client.captcha_status(session_id)
+        captcha_states = [state for state in states if _captcha_has_challenge(state)]
 
         if not captcha_states:
             self._emit(note="Reddit login loaded; no CAPTCHA detected", url=page.url)
@@ -344,7 +336,7 @@ class Dreamer:
                 for state in captcha_states
                 for task in _captcha_tasks(state)
             }
-            failures = {"failed_to_detect", "failed_to_solve", "validation_failed"}
+            failures = {"failed_to_solve", "validation_failed"}
             if statuses & failures:
                 failed = ", ".join(sorted(statuses & failures))
                 raise RuntimeError(f"Steel could not solve Reddit CAPTCHA: {failed}")
@@ -359,6 +351,9 @@ class Dreamer:
 
     async def _dream(self, page: Page) -> None:
         if not self.state.query.strip():
+            self._emit(0, "holding logged-in session for 10 seconds", page.url)
+            await asyncio.sleep(LOGIN_ONLY_DWELL_SECONDS)
+            self._check_stop()
             self._emit(0, "login-only run complete", page.url)
             return
         await self._search(page)
@@ -467,6 +462,14 @@ def _captcha_value(item, name: str):
 
 def _captcha_tasks(state) -> list:
     return _captcha_value(state, "tasks") or []
+
+
+def _captcha_has_challenge(state) -> bool:
+    non_challenge_statuses = {None, "undetected", "failed_to_detect"}
+    return any(
+        _captcha_value(task, "status") not in non_challenge_statuses
+        for task in _captcha_tasks(state)
+    )
 
 
 def _captcha_is_solving(state) -> bool:
