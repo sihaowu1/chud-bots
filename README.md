@@ -25,7 +25,7 @@ Prerequisites: Python 3.12+ (3.13 recommended), [uv](https://docs.astral.sh/uv/)
 3. Start the app:
 
    ```powershell
-   uv run uvicorn backend.main:app --reload
+   uv run uvicorn backend.main:app
    ```
 
 4. Open <http://127.0.0.1:8000>, optionally enter a subreddit, add one or more search queries, set **Dreamers** to `1`, then click **Go under**. The target is fixed to Reddit; when a subreddit is supplied, the agent targets that community.
