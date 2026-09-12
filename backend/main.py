@@ -31,7 +31,10 @@ campaign_orchestrator = CampaignOrchestrator()
 
 class LaunchRequest(BaseModel):
     target: str = Field(..., description="URL of the site to plant in search")
-    queries: list[str] = Field(..., min_length=1, description="Search phrases the dreamers will type")
+    queries: list[str] = Field(
+        default_factory=list,
+        description="Search phrases the dreamers will type; blank runs login only",
+    )
     count: int = Field(1, ge=1, le=50)
 
 

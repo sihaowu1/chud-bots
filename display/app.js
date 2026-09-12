@@ -35,7 +35,7 @@ function render(a) {
     card.dataset.id = a.id;
     $(".persona", card).textContent = a.persona;
     $(".traits", card).textContent = a.traits.join(" · ");
-    $(".query", card).textContent = `"${a.query}"`;
+    $(".query", card).textContent = a.query ? `"${a.query}"` : "login only";
     card.dataset.mobile = a.traits.includes("mobile");
     $(".stop", card).onclick = () => fetch(`/api/agents/${a.id}/stop`, { method: "POST" });
     $(".empty", grid)?.remove();

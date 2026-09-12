@@ -89,7 +89,7 @@ class Dreamer:
         session = None
         try:
             self._emit(0, "waking up a Steel session")
-            session = await steel_client.create_session(mobile=self.persona.mobile)
+            session = await steel_client.create_session()
             self.state.session = steel_client.session_summary(session)
             self._emit(0, f"session {session.id[:8]} live")
 
@@ -243,6 +243,9 @@ class Dreamer:
         self._emit(note="submitted Reddit credentials", url=page.url)
 
     async def _dream(self, page: Page) -> None:
+        if not self.state.query.strip():
+            self._emit(0, "login-only run complete", page.url)
+            return
         await self._search(page)
         self._check_stop()
         await self._land(page)

@@ -17,9 +17,8 @@ def client() -> AsyncSteel:
     return _client
 
 
-async def create_session(mobile: bool = False) -> Session:
-    """Spin up a stealth, proxied Steel browser that looks like a real visitor."""
-    dims = {"width": 390, "height": 844} if mobile else {"width": 1366, "height": 768}
+async def create_session() -> Session:
+    """Spin up a stealth, proxied desktop Steel browser."""
     return await client().sessions.create(
         use_proxy=config.STEEL_USE_PROXY,
         solve_captcha=True,
@@ -27,8 +26,8 @@ async def create_session(mobile: bool = False) -> Session:
             "humanize_interactions": True,
             "auto_captcha_solving": True,
         },
-        device_config={"device": "mobile" if mobile else "desktop"},
-        dimensions=dims,
+        device_config={"device": "desktop"},
+        dimensions={"width": 1366, "height": 768},
         debug_config={"interactive": False, "system_cursor": True},
         api_timeout=config.SESSION_TIMEOUT_MS,
     )

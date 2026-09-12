@@ -22,12 +22,12 @@ class Persona:
 _POOL = [
     Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
     Persona("Arthur", False, (40, 90), 2, (2, 4), ["fast typist", "desktop"]),
-    Persona("Ariadne", True, (90, 200), 3, (4, 8), ["mobile", "scroller"]),
+    Persona("Ariadne", False, (90, 200), 3, (4, 8), ["desktop", "scroller"]),
     Persona("Eames", False, (70, 160), 1, (2, 3), ["skimmer", "desktop"]),
     Persona("Saito", False, (110, 220), 2, (3, 5), ["deliberate", "desktop"]),
-    Persona("Yusuf", True, (80, 180), 2, (3, 6), ["mobile", "curious"]),
+    Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
     Persona("Mal", False, (50, 120), 4, (4, 7), ["deep diver", "desktop"]),
-    Persona("Fischer", True, (100, 210), 1, (2, 4), ["mobile", "skimmer"]),
+    Persona("Fischer", False, (100, 210), 1, (2, 4), ["desktop", "skimmer"]),
 ]
 
 

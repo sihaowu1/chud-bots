@@ -92,6 +92,24 @@ def dreamer():
 
 
 class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
+    async def test_blank_query_skips_search_flow(self):
+        agent = dreamer()
+        agent.state.query = "  "
+        page = FakePage(FakeField())
+
+        with (
+            patch.object(agent, "_search", new=AsyncMock()) as search,
+            patch.object(agent, "_land", new=AsyncMock()) as land,
+            patch.object(agent, "_deepen", new=AsyncMock()) as deepen,
+        ):
+            await agent._dream(page)
+
+        search.assert_not_awaited()
+        land.assert_not_awaited()
+        deepen.assert_not_awaited()
+        self.assertEqual(agent.state.level, 0)
+        self.assertEqual(agent.state.note, "login-only run complete")
+
     async def test_copies_matching_temp_mail_input(self):
         agent = dreamer()
         matching = FakeField("person@example.com")

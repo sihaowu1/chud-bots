@@ -45,7 +45,7 @@ is the only file that imports the Steel SDK.
 | `main.py`        | FastAPI app. REST endpoints, SSE stream at `/api/events`, serves `display/`. |
 | `orchestrator.py`| Registry of running dreamers. `launch`, `stop`, `stop_all`, `clear_finished`. Enforces `MAX_AGENTS`. |
 | `agent.py`       | `Dreamer`: one Steel session driven through the dream levels with Playwright over CDP. |
-| `personas.py`    | Behaviour profiles (typing speed, mobile/desktop, scroll habits, link depth). |
+| `personas.py`    | Behaviour profiles (typing speed, scroll habits, link depth). Steel sessions currently use desktop devices. |
 | `steel_client.py`| Thin wrapper over `steel-sdk`: create / release / list sessions. |
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
@@ -86,7 +86,7 @@ to Steel's browser over CDP, so `playwright install` is not required.
 
 | method | path                      | body / notes |
 |--------|---------------------------|--------------|
-| POST   | `/api/runs`               | `{target, queries[], count}` -> launches `count` dreamers, queries cycled |
+| POST   | `/api/runs`               | `{target, queries[], count}` -> launches `count` dreamers, queries cycled; an empty `queries` list runs only the Reddit login flow |
 | GET    | `/api/agents`             | current snapshots |
 | POST   | `/api/agents/{id}/stop`   | cooperative stop; session released |
 | POST   | `/api/stop-all`           | stops everything, then `sessions.release_all()` on Steel |
@@ -114,7 +114,7 @@ kept out of the context sent to the model.
 
 ## Steel specifics that bit us
 
-- Sessions are created with `use_proxy`, `solve_captcha`, `stealth_config.humanizeInteractions`
+- Desktop sessions are created with `use_proxy`, `solve_captcha`, `stealth_config.humanizeInteractions`
   and `debug_config.interactive=false`. See `steel_client.create_session`.
 - `session.websocket_url` is the CDP endpoint; pass it straight to `connect_over_cdp`.
 - `session.debug_url` is embeddable in an iframe. `session_viewer_url` is the
