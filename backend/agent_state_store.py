@@ -26,7 +26,14 @@ def load_or_create(persona: str) -> dict:
         raise RuntimeError(f"agent state {path.name} must contain a JSON object")
 
     state.setdefault("persona", persona)
-    state.setdefault("email", {"address": None, "login": None})
+    email = state.setdefault("email", {"address": None, "login": None})
+    if not isinstance(email, dict):
+        raise RuntimeError(f"agent state {path.name} email must contain a JSON object")
+    email.setdefault("address", None)
+    email.setdefault("login", None)
+    if email.get("address") and not email.get("password"):
+        email["password"] = _password_for(persona)
+        save(persona, state)
     state.setdefault("reddit", {"username": None})
     state.setdefault("assignments", [])
     state.setdefault("activity", [])
@@ -35,6 +42,10 @@ def load_or_create(persona: str) -> dict:
 
 def save(persona: str, state: dict) -> None:
     """Write a persona state file atomically."""
+    email = state.get("email")
+    if isinstance(email, dict) and email.get("address") and not email.get("password"):
+        email["password"] = _password_for(persona)
+
     path = _path_for(persona)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
@@ -49,6 +60,7 @@ def _blank_state(persona: str) -> dict:
         "email": {
             "address": None,
             "login": None,
+            "password": None,
         },
         "reddit": {"username": None},
         "assignments": [],
@@ -97,6 +109,11 @@ def public_ledger(persona: str) -> dict:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _password_for(persona: str) -> str:
+    """Return the local-only Reddit password for a dreamer persona."""
+    return f"123ABC#{persona}"
 
 
 def _path_for(persona: str) -> Path:

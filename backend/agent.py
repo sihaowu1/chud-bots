@@ -9,6 +9,7 @@
 
 import asyncio
 import random
+import re
 import uuid
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -124,7 +125,7 @@ class Dreamer:
             saved = agent_state_store.load_or_create(self.persona.name)
             email = saved.get("email")
             if not isinstance(email, dict):
-                email = {"address": None, "login": None}
+                email = {"address": None, "login": None, "password": None}
                 saved["email"] = email
 
             address = email.get("address")
@@ -172,7 +173,7 @@ class Dreamer:
                 continue
 
     async def _prepare_reddit_signup(self, page: Page) -> None:
-        """Put the persona email into Reddit's first signup step without submitting."""
+        """Enter the persona's locally stored credentials into Reddit signup."""
         if not self.state.email:
             raise RuntimeError("cannot prepare Reddit signup without an email address")
 
@@ -200,7 +201,46 @@ class Dreamer:
 
         if (await field.input_value()).strip() != self.state.email:
             raise RuntimeError("Reddit email field did not retain the Temp-Mail address")
-        self._emit(note="pasted email into Reddit signup (not submitted)", url=page.url)
+        self._emit(note="pasted email into Reddit signup", url=page.url)
+
+        # The state-store hook creates the password when the email is saved. Give
+        # that local write time to settle, then read the password back from disk
+        # instead of deriving or retaining it in the browser agent.
+        await asyncio.sleep(3)
+        self._check_stop()
+        saved = agent_state_store.load_or_create(self.persona.name)
+        email = saved.get("email")
+        password = email.get("password") if isinstance(email, dict) else None
+        if not isinstance(password, str) or not password:
+            raise RuntimeError("agent state did not contain a generated password")
+
+        password_field = page.locator(
+            'input[name="password"], input[type="password"], input[autocomplete="new-password"], '
+            'input[autocomplete="current-password"]'
+        ).first
+        try:
+            await password_field.wait_for(state="visible", timeout=2_000)
+        except Exception:
+            # Reddit can present email as a separate first step.
+            continue_button = page.get_by_role(
+                "button", name=re.compile(r"continue|next", re.IGNORECASE)
+            ).first
+            await continue_button.click()
+            await password_field.wait_for(state="visible", timeout=15_000)
+
+        await password_field.click()
+        await password_field.fill(password)
+        if await password_field.input_value() != password:
+            raise RuntimeError("Reddit password field did not retain the generated password")
+        self._emit(note="entered password from local agent state", url=page.url)
+
+        await asyncio.sleep(2)
+        self._check_stop()
+        submit = page.get_by_role(
+            "button", name=re.compile(r"log\s*in|sign\s*up|continue", re.IGNORECASE)
+        ).first
+        await submit.click()
+        self._emit(note="submitted Reddit credentials", url=page.url)
 
     async def _dream(self, page: Page) -> None:
         await self._search(page)

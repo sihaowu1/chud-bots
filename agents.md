@@ -26,6 +26,8 @@ adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
 implemented. Keep that distinction explicit when changing this document or
 presenting the project.
 
+# Safety and demo boundary 
+
 ## Layout
 
 ```
@@ -62,7 +64,7 @@ viewer), a dream-level bar, the latest note, and a kick button.
 
 | level | name   | what happens |
 |-------|--------|--------------|
-| 0     | wake   | Steel session created, Playwright attached via `session.websocket_url`; a Temp-Mail address is copied into Reddit's signup email field but not submitted. |
+| 0     | wake   | Steel session created, Playwright attached via `session.websocket_url`; a Temp-Mail address is copied into Reddit signup, the local ledger generates a persona password, and the credentials are submitted. |
 | 1     | search | Google opened, consent dismissed, query typed with per-keystroke delay, Enter |
 | 2     | land   | First result whose href contains the target host is clicked. If absent, navigates directly and logs "weak signal". |
 | 3+    | deepen | Scroll, dwell, click a random internal link; repeat up to `persona.max_depth` |

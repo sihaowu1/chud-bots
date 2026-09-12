@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
+from backend import agent_state_store
 from backend.agent import REDDIT_SIGNUP_URL, Dreamer
 from backend.personas import Persona
 
@@ -10,12 +12,14 @@ class FakeField:
         self.pasted_value = pasted_value
         self.presses = []
         self.fill_calls = []
+        self.wait_calls = []
 
     @property
     def first(self):
         return self
 
     async def wait_for(self, **_kwargs):
+        self.wait_calls.append(_kwargs)
         return None
 
     async def click(self):
@@ -45,20 +49,40 @@ class FakeInputs:
         return self.fields[index]
 
 
+class FakeButton:
+    def __init__(self):
+        self.clicks = 0
+
+    @property
+    def first(self):
+        return self
+
+    async def click(self):
+        self.clicks += 1
+
+
 class FakePage:
-    def __init__(self, field):
+    def __init__(self, field, *, password_field=None):
         self.url = "https://temp-mail.org/en/"
         self.field = field
+        self.password_field = password_field or FakeField()
+        self.continue_button = FakeButton()
+        self.submit_button = FakeButton()
         self.visits = []
 
     async def goto(self, url, **_kwargs):
         self.url = url
         self.visits.append(url)
 
-    def locator(self, _selector):
+    def locator(self, selector):
+        if "password" in selector:
+            return self.password_field
         return self.field
 
-    def get_by_role(self, *_args, **_kwargs):
+    def get_by_role(self, role, *_args, **kwargs):
+        if role == "button":
+            pattern = kwargs["name"].pattern
+            return self.continue_button if "next" in pattern else self.submit_button
         return self.field
 
 
@@ -78,19 +102,31 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(agent._email_copied)
         self.assertEqual(matching.presses, ["Control+A", "Control+C"])
 
-    async def test_pastes_copied_email_without_submitting(self):
+    async def test_pastes_email_then_fills_password_and_submits(self):
         agent = dreamer()
         agent.state.email = "person@example.com"
         agent._email_copied = True
         field = FakeField(pasted_value=agent.state.email)
-        page = FakePage(field)
+        password_field = FakeField()
+        page = FakePage(field, password_field=password_field)
 
-        await agent._prepare_reddit_signup(page)
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={"email": {"password": "123ABC#Test"}},
+            ),
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await agent._prepare_reddit_signup(page)
 
         self.assertEqual(page.visits, [REDDIT_SIGNUP_URL])
         self.assertEqual(field.presses, ["Control+V"])
         self.assertEqual(field.fill_calls, [])
         self.assertEqual(field.value, agent.state.email)
+        self.assertEqual(password_field.fill_calls, ["123ABC#Test"])
+        self.assertEqual(page.submit_button.clicks, 1)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [3, 2])
 
     async def test_fills_saved_email_when_clipboard_is_unavailable(self):
         agent = dreamer()
@@ -98,7 +134,15 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         field = FakeField()
         page = FakePage(field)
 
-        await agent._prepare_reddit_signup(page)
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={"email": {"password": "123ABC#Test"}},
+            ),
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._prepare_reddit_signup(page)
 
         self.assertEqual(field.presses, [])
         self.assertEqual(field.fill_calls, [agent.state.email])
