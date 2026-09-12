@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inception</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="totem" aria-hidden="true"></span>
+      <h1>Inception</h1>
+      <span class="tag">plant an idea in the search index</span>
+    </div>
+    <div class="meta">
+      <span id="live-count">0</span>/<span id="max-count">–</span> dreaming
+      <span id="conn" class="conn">connecting…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel">
+      <form id="launch">
+        <label>Target site
+          <input name="target" placeholder="https://example.com" required />
+        </label>
+        <label>Search queries <small>(one per line, cycled across agents)</small>
+          <textarea name="queries" rows="4" placeholder="best cold brew subscription&#10;cold brew delivered monthly" required></textarea>
+        </label>
+        <label>Dreamers
+          <input name="count" type="number" min="1" max="50" value="3" />
+        </label>
+        <button type="submit" class="primary">Go under</button>
+        <div class="row">
+          <button type="button" id="stop-all">Kick everyone</button>
+          <button type="button" id="clear">Clear finished</button>
+        </div>
+      </form>
+
+      <section class="levels">
+        <h2>Dream levels</h2>
+        <ol>
+          <li><b>L0</b> wake — Steel session spins up</li>
+          <li><b>L1</b> search — query typed into Google</li>
+          <li><b>L2</b> land — target clicked from results</li>
+          <li><b>L3+</b> deepen — scroll, dwell, follow links</li>
+        </ol>
+      </section>
+
+      <section class="log">
+        <h2>Log</h2>
+        <ul id="log"></ul>
+      </section>
+    </aside>
+
+    <section id="grid" class="grid">
+      <p class="empty">No one is dreaming yet.</p>
+    </section>
+  </main>
+
+  <template id="card">
+    <article class="card">
+      <header>
+        <div class="who">
+          <span class="persona"></span>
+          <span class="traits"></span>
+        </div>
+        <span class="status"></span>
+      </header>
+      <div class="viewer">
+        <iframe title="live session" allow="autoplay" loading="lazy"></iframe>
+        <div class="placeholder">waiting for session…</div>
+      </div>
+      <div class="depth" aria-label="dream level">
+        <span data-l="0"></span><span data-l="1"></span><span data-l="2"></span><span data-l="3"></span><span data-l="4"></span><span data-l="5"></span>
+      </div>
+      <p class="note"></p>
+      <p class="url"><a target="_blank" rel="noopener"></a></p>
+      <footer>
+        <span class="query"></span>
+        <div class="actions">
+          <a class="open" target="_blank" rel="noopener">open in Steel</a>
+          <button class="stop">kick</button>
+        </div>
+      </footer>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
