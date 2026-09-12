@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from backend import agent_state_store
@@ -133,6 +134,105 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.submit_button.clicks, 1)
         self.assertEqual(agent.state.note, "submitted saved Reddit login")
         sleep.assert_awaited_once_with(3)
+
+    async def test_detected_login_captcha_is_solved_before_credentials_are_entered(self):
+        agent = dreamer()
+        agent.state.session = {"id": "session-123"}
+        identity_field = FakeField()
+        password_field = FakeField()
+        page = FakePage(identity_field, password_field=password_field)
+        detected = [
+            {
+                "isSolvingCaptcha": False,
+                "tasks": [{"status": "detected"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+        solved = [
+            {
+                "isSolvingCaptcha": False,
+                "tasks": [{"status": "solved"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+
+        with (
+            patch(
+                "backend.agent.steel_client.captcha_status",
+                new=AsyncMock(side_effect=[detected, solved]),
+            ) as status,
+            patch(
+                "backend.agent.steel_client.solve_captcha",
+                new=AsyncMock(return_value=SimpleNamespace(success=True, message=None)),
+            ) as solve,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._login_reddit(page, "saved@example.com", "saved-password")
+
+        self.assertEqual(status.await_count, 2)
+        solve.assert_awaited_once_with("session-123", url=REDDIT_LOGIN_URL)
+        self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
+        self.assertEqual(password_field.fill_calls, ["saved-password"])
+
+    async def test_auto_solving_login_captcha_is_waited_on(self):
+        agent = dreamer()
+        agent.state.session = {"id": "session-123"}
+        page = FakePage(FakeField())
+        solving = [
+            {
+                "isSolvingCaptcha": True,
+                "tasks": [{"status": "solving"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+        solved = [
+            {
+                "isSolvingCaptcha": False,
+                "tasks": [{"status": "solved"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+
+        with (
+            patch(
+                "backend.agent.steel_client.captcha_status",
+                new=AsyncMock(side_effect=[solving, solved]),
+            ),
+            patch(
+                "backend.agent.steel_client.solve_captcha", new=AsyncMock()
+            ) as solve,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._solve_reddit_captcha(page)
+
+        solve.assert_not_awaited()
+        self.assertEqual(agent.state.note, "Steel solved the Reddit CAPTCHA")
+
+    async def test_already_solved_login_captcha_does_not_request_second_solve(self):
+        agent = dreamer()
+        agent.state.session = {"id": "session-123"}
+        page = FakePage(FakeField())
+        solved = [
+            {
+                "isSolvingCaptcha": False,
+                "tasks": [{"status": "solved"}],
+                "url": REDDIT_LOGIN_URL,
+            }
+        ]
+
+        with (
+            patch(
+                "backend.agent.steel_client.captcha_status",
+                new=AsyncMock(return_value=solved),
+            ),
+            patch(
+                "backend.agent.steel_client.solve_captcha", new=AsyncMock()
+            ) as solve,
+        ):
+            await agent._solve_reddit_captcha(page)
+
+        solve.assert_not_awaited()
+        self.assertEqual(agent.state.note, "Steel solved the Reddit CAPTCHA")
 
     async def test_incomplete_credentials_keep_signup_flow(self):
         agent = dreamer()

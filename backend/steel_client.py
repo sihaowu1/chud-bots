@@ -33,6 +33,16 @@ async def create_session() -> Session:
     )
 
 
+async def captcha_status(session_id: str):
+    """Return Steel's detected CAPTCHA state for every page in a session."""
+    return await client().sessions.captchas.status(session_id)
+
+
+async def solve_captcha(session_id: str, *, url: str):
+    """Ask Steel to solve the CAPTCHA detected at ``url``."""
+    return await client().sessions.captchas.solve(session_id, url=url)
+
+
 async def release_session(session_id: str) -> None:
     try:
         await client().sessions.release(session_id)

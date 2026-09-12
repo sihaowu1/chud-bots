@@ -23,6 +23,9 @@ SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
 REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
 REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
+CAPTCHA_DETECTION_TIMEOUT_SECONDS = 5
+CAPTCHA_SOLVE_TIMEOUT_SECONDS = 60
+CAPTCHA_POLL_INTERVAL_SECONDS = 1
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -263,6 +266,7 @@ class Dreamer:
         self._check_stop()
         self._emit(note="opening Reddit login", url=REDDIT_LOGIN_URL)
         await page.goto(REDDIT_LOGIN_URL, wait_until="domcontentloaded")
+        await self._solve_reddit_captcha(page)
 
         identity_field = page.locator(
             'input[name="username"], input[name="email"], input[type="email"], '
@@ -291,6 +295,67 @@ class Dreamer:
         self._emit(note="submitted saved Reddit login", url=page.url)
         await asyncio.sleep(3)
         self._check_stop()
+
+    async def _solve_reddit_captcha(self, page: Page) -> None:
+        """Detect a Reddit login CAPTCHA and let Steel solve it before typing."""
+        session_id = (self.state.session or {}).get("id")
+        if not session_id:
+            # Direct unit-level calls do not have a live Steel session.
+            return
+
+        detection_deadline = (
+            asyncio.get_running_loop().time() + CAPTCHA_DETECTION_TIMEOUT_SECONDS
+        )
+        captcha_states = []
+        while asyncio.get_running_loop().time() < detection_deadline:
+            self._check_stop()
+            states = await steel_client.captcha_status(session_id)
+            captcha_states = [state for state in states if _captcha_tasks(state)]
+            if captcha_states:
+                break
+            await asyncio.sleep(CAPTCHA_POLL_INTERVAL_SECONDS)
+
+        if not captcha_states:
+            self._emit(note="Reddit login loaded; no CAPTCHA detected", url=page.url)
+            return
+
+        self._emit(note="CAPTCHA detected on Reddit login", url=page.url)
+        initial_statuses = {
+            _captcha_value(task, "status")
+            for state in captcha_states
+            for task in _captcha_tasks(state)
+        }
+        if initial_statuses and initial_statuses <= {"solved"}:
+            self._emit(note="Steel solved the Reddit CAPTCHA", url=page.url)
+            return
+        if not any(_captcha_is_solving(state) for state in captcha_states):
+            response = await steel_client.solve_captcha(session_id, url=page.url)
+            if not response.success:
+                raise RuntimeError(response.message or "Steel rejected the CAPTCHA solve request")
+        self._emit(note="Steel is solving the Reddit CAPTCHA", url=page.url)
+
+        solve_deadline = asyncio.get_running_loop().time() + CAPTCHA_SOLVE_TIMEOUT_SECONDS
+        while asyncio.get_running_loop().time() < solve_deadline:
+            self._check_stop()
+            states = await steel_client.captcha_status(session_id)
+            captcha_states = [state for state in states if _captcha_tasks(state)]
+            statuses = {
+                _captcha_value(task, "status")
+                for state in captcha_states
+                for task in _captcha_tasks(state)
+            }
+            failures = {"failed_to_detect", "failed_to_solve", "validation_failed"}
+            if statuses & failures:
+                failed = ", ".join(sorted(statuses & failures))
+                raise RuntimeError(f"Steel could not solve Reddit CAPTCHA: {failed}")
+            if captcha_states and statuses and statuses <= {"solved"} and not any(
+                _captcha_is_solving(state) for state in captcha_states
+            ):
+                self._emit(note="Steel solved the Reddit CAPTCHA", url=page.url)
+                return
+            await asyncio.sleep(CAPTCHA_POLL_INTERVAL_SECONDS)
+
+        raise TimeoutError("Steel did not solve the Reddit CAPTCHA within 60 seconds")
 
     async def _dream(self, page: Page) -> None:
         if not self.state.query.strip():
@@ -392,3 +457,20 @@ class _Stopped(Exception):
 
 def _host(url: str) -> str:
     return urlparse(url if "://" in url else f"https://{url}").hostname or url
+
+
+def _captcha_value(item, name: str):
+    if isinstance(item, dict):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _captcha_tasks(state) -> list:
+    return _captcha_value(state, "tasks") or []
+
+
+def _captcha_is_solving(state) -> bool:
+    return bool(
+        _captcha_value(state, "is_solving_captcha")
+        or _captcha_value(state, "isSolvingCaptcha")
+    )
