@@ -19,6 +19,7 @@ guaranteed ranking lever.
 ```
 backend/   everything that talks to Steel or drives a browser (Python, FastAPI)
 display/   static HTML/CSS/JS that only talks to backend/ over /api/*
+frontend/  Inception dashboard (Next.js). Mock data only; no backend calls yet.
 agents.md  this file
 .env       STEEL_API_KEY etc. (copy from .env.example, never commit)
 ```
@@ -43,6 +44,42 @@ is the only file that imports the Steel SDK.
 `index.html` + `styles.css` + `app.js`, no build step. Each agent gets a card
 with an `<iframe>` pointed at the Steel session's `debug_url` (Steel's live
 viewer), a dream-level bar, the latest note, and a kick button.
+
+### frontend/
+
+The hackathon product UI for **Inception**, a multi-agent discoverability
+platform. Entirely client-side with simulated agents — it does not talk to
+`backend/` or Reddit. Next.js 16 (App Router), React 19, TypeScript, Tailwind v4,
+shadcn/ui (radix), Lucide, Framer Motion, Recharts, zustand.
+
+```
+cd frontend && npm install && npm run dev      # http://localhost:3000
+npm run build && npm run lint                   # both must be clean
+```
+
+| path | role |
+|------|------|
+| `src/app/(app)/*` | routes: dashboard `/`, campaign, activity, opportunities, agents (list + network), discoverability, analytics, settings |
+| `src/app/globals.css` | design tokens. Single dark theme, neutral surfaces, one accent (`--signal`), semantic success/warning/danger. Keyframes for row entry/flash. |
+| `src/lib/types.ts` | domain model: Campaign, Agent, ActivityEvent, PlannedTask, Opportunity… |
+| `src/lib/mock/*` | seed data. `agents.ts` holds the deploy order + `allocationFor(n)`; `content.ts` the thread/query pools the simulator draws from. |
+| `src/lib/sim/generator.ts` | event simulator. Multi-step chains (discover → intent → relevance → policy → draft → review → monitor) are scheduled as pending steps so several interleave. |
+| `src/lib/store.ts` | zustand store. `hydrate()` seeds history on the client (never at module load — timestamps must not differ between SSR and client). `tick()` applies one emission. |
+| `src/lib/sim/use-simulation.ts` | mounts the 2–5 s tick loop once, in `AppShell`. |
+| `src/components/shell/*` | sidebar, top bar (campaign switcher, live state, pause-all with confirm), notifications, ⌘K palette. |
+| `src/components/activity/*` | the live feed. `activity-feed.tsx` holds back new rows while the user is scrolled or inspecting and shows "N new events ↓" instead. |
+| `src/components/shared/*` | primitives: status dots, animated numbers, score, inspector panel, toast with undo, section/panel/field. |
+
+Conventions that matter here:
+
+- Everything time-dependent is created in `hydrate()`, not at import. Module-level
+  `Date.now()` caused hydration mismatches.
+- Colour is semantic only: `signal` for active/system, `success`/`warning`/`danger`
+  for state. Agents and roles do not get their own colours.
+- Only computational states (`searching`, `analyzing`, `writing`) pulse.
+- Lint runs the React Compiler rules: no `setState` inside effects. Subscribe to the
+  store (`useSim.subscribe`) or use `key=` remounts / adjust-state-during-render.
+- Detail views show decision summaries and evidence, never fake chain-of-thought.
 
 ## Dream levels (the state machine in `agent.py`)
 
