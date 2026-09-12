@@ -90,6 +90,7 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ledger = updated["agent_ledgers"]["Cobb"]
         self.assertEqual(ledger["reddit_username"], "synthetic_cobb")
         self.assertEqual(ledger["activity"][0]["url"], "https://mock.local/posts/1")
+        self.assertEqual(ledger["activity"][0]["reddit_username"], "synthetic_cobb")
         self.assertIn("timestamp", ledger["activity"][0])
         self.assertEqual(updated["phases"][1]["assignments"][0]["wait_for"], [task_id])
 

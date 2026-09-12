@@ -77,6 +77,7 @@ def append_activity(
     if reddit_username:
         state["reddit"]["username"] = reddit_username
     item = dict(activity)
+    item.setdefault("reddit_username", state["reddit"].get("username"))
     item.setdefault("timestamp", _timestamp())
     state["activity"].append(item)
     save(persona, state)

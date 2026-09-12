@@ -17,19 +17,6 @@ different voices, interests, and browsing patterns make each agent legible on
 screen and illustrate how distributed online discussion can shape retrieval and
 summarization.
 
-### Safety and demo boundary
-
-Coordinated fake personas, undisclosed promotional posts, and attempts to
-manipulate Google or Reddit are deceptive and may violate both platforms'
-policies. Do not use this repository to create Reddit accounts, evade platform
-controls, publish coordinated spam, or manufacture real-world consensus.
-
-Run the posting portion only against fixtures, a mock Reddit community, or a
-private environment whose participants have consented. Any public-facing demo
-content must be clearly labeled as synthetic. Treat the desired AI Overview as
-a staged or measured demonstration outcome, never as a guaranteed ranking
-lever or a factual claim that the system may fabricate.
-
 ### Current implementation
 
 The code implements the earlier search-traffic prototype and a model-backed
@@ -75,7 +62,7 @@ viewer), a dream-level bar, the latest note, and a kick button.
 
 | level | name   | what happens |
 |-------|--------|--------------|
-| 0     | wake   | Steel session created, Playwright attached via `session.websocket_url` |
+| 0     | wake   | Steel session created, Playwright attached via `session.websocket_url`; a Temp-Mail address is copied into Reddit's signup email field but not submitted. |
 | 1     | search | Google opened, consent dismissed, query typed with per-keystroke delay, Enter |
 | 2     | land   | First result whose href contains the target host is clicked. If absent, navigates directly and logs "weak signal". |
 | 3+    | deepen | Scroll, dwell, click a random internal link; repeat up to `persona.max_depth` |

@@ -103,8 +103,13 @@ class OpenAIResponsesPlanner:
             },
         }
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(f"{self.base_url}/responses", headers=headers, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                response = await client.post(
+                    f"{self.base_url}/responses", headers=headers, json=payload
+                )
+        except httpx.HTTPError as exc:
+            raise OrchestratorModelError(f"could not reach Responses API: {exc}") from exc
         if response.is_error:
             detail = response.text[:500]
             raise OrchestratorModelError(f"Responses API returned {response.status_code}: {detail}")

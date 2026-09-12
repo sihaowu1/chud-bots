@@ -1,6 +1,6 @@
 """One dreamer. Drives a single Steel session through the dream levels:
 
-  L0  wake      - Steel session created, Playwright attached over CDP
+  L0  wake      - Steel session created, Temp-Mail copied into Reddit signup
   L1  search    - type the query into Google
   L2  land      - find the target domain in the results and click it
   L3+ deepen    - scroll, dwell, follow internal links
