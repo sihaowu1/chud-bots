@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 STEEL_API_KEY = os.environ.get("STEEL_API_KEY", "")
-MAX_AGENTS = int(os.environ.get("MAX_AGENTS", "5"))
+# Temporary Yusuf-only login debugging cap, also reported to the display.
+MAX_AGENTS = min(1, int(os.environ.get("MAX_AGENTS", "5")))
 STEEL_USE_PROXY = os.environ.get("STEEL_USE_PROXY", "true").lower() == "true"
 
 # Model-backed campaign coordinator. The model name is intentionally configurable:

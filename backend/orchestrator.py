@@ -10,7 +10,7 @@ _agents: dict[str, Dreamer] = {}
 
 
 def live_count() -> int:
-    return sum(1 for d in _agents.values() if d.state.status == "running")
+    return sum(1 for d in _agents.values() if d.state.status in ("queued", "running"))
 
 
 def snapshot() -> list[dict]:

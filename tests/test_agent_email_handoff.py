@@ -3,7 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from backend import agent_state_store
-from backend.agent import REDDIT_LOGIN_URL, REDDIT_SIGNUP_URL, Dreamer
+from backend.agent import (
+    REDDIT_HOME_URL, REDDIT_LOGIN_URL, REDDIT_SIGNUP_URL, Dreamer, PlaywrightTimeoutError,
+)
 from backend.personas import Persona
 
 
@@ -51,8 +53,9 @@ class FakeInputs:
 
 
 class FakeButton:
-    def __init__(self):
+    def __init__(self, on_click=None):
         self.clicks = 0
+        self.on_click = on_click
 
     @property
     def first(self):
@@ -60,6 +63,11 @@ class FakeButton:
 
     async def click(self):
         self.clicks += 1
+        if self.on_click:
+            self.on_click()
+
+    async def wait_for(self, **kwargs):
+        pass
 
 
 class FakePage:
@@ -68,9 +76,22 @@ class FakePage:
         self.field = field
         self.password_field = password_field or FakeField()
         self.continue_button = FakeButton()
-        self.submit_button = FakeButton()
+        self.submit_button = FakeButton(lambda: setattr(self, "url", "https://www.reddit.com/"))
+        self.login_link = FakeButton(lambda: setattr(self, "url", REDDIT_LOGIN_URL))
         self.visits = []
         self.button_name_patterns = []
+
+    def get_by_text(self, pattern):
+        return FakeInputs([])
+
+    async def evaluate(self, script):
+        return "Test"
+
+    def on(self, event, callback):
+        pass
+
+    def remove_listener(self, event, callback):
+        pass
 
     async def goto(self, url, **_kwargs):
         self.url = url
@@ -82,6 +103,8 @@ class FakePage:
         return self.field
 
     def get_by_role(self, role, *_args, **kwargs):
+        if role == "link":
+            return self.login_link
         if role == "button":
             pattern = kwargs["name"].pattern
             self.button_name_patterns.append(pattern)
@@ -95,6 +118,20 @@ def dreamer():
 
 
 class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delayed_home_challenge_is_checked_before_clicking_login(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+        page.login_link.wait_for = AsyncMock(
+            side_effect=[PlaywrightTimeoutError("challenge"), None]
+        )
+        with (
+            patch.object(agent, "_solve_reddit_captcha", new=AsyncMock()) as solve,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._login_reddit(page, "saved@example.com", "saved-password")
+        self.assertEqual(solve.await_count, 2)
+        self.assertEqual(page.login_link.clicks, 1)
+
     async def test_complete_saved_credentials_go_directly_to_login(self):
         agent = dreamer()
         page = FakePage(FakeField())
@@ -130,13 +167,14 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
             await agent._login_reddit(page, "saved@example.com", "saved-password")
 
-        self.assertEqual(page.visits, [REDDIT_LOGIN_URL])
+        self.assertEqual(page.visits, [REDDIT_HOME_URL])
+        self.assertEqual(page.login_link.clicks, 1)
         self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
         self.assertEqual(password_field.fill_calls, ["saved-password"])
         self.assertEqual(page.submit_button.clicks, 1)
         self.assertEqual(page.button_name_patterns, [r"^\s*log\s*in\s*$"])
-        self.assertEqual(agent.state.note, "submitted saved Reddit login")
-        sleep.assert_awaited_once_with(3)
+        self.assertEqual(agent.state.note, "confirmed signed-in Reddit home page")
+        sleep.assert_awaited_once_with(2)
 
     async def test_detected_login_captcha_is_solved_before_credentials_are_entered(self):
         agent = dreamer()
@@ -173,7 +211,7 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
             await agent._login_reddit(page, "saved@example.com", "saved-password")
 
         self.assertEqual(status.await_count, 2)
-        solve.assert_awaited_once_with("session-123", url=REDDIT_LOGIN_URL)
+        solve.assert_awaited_once_with("session-123", url=REDDIT_HOME_URL)
         self.assertEqual(identity_field.fill_calls, ["saved@example.com"])
         self.assertEqual(password_field.fill_calls, ["saved-password"])
 
@@ -292,6 +330,7 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         agent = dreamer()
         agent.state.query = "  "
         page = FakePage(FakeField())
+        page.url = "https://www.reddit.com/"
 
         with (
             patch.object(agent, "_search", new=AsyncMock()) as search,
@@ -307,6 +346,64 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         sleep.assert_awaited_once_with(10)
         self.assertEqual(agent.state.level, 0)
         self.assertEqual(agent.state.note, "login-only run complete")
+
+    async def test_rejected_credentials_never_start_hold(self):
+        agent = dreamer()
+        agent.state.query = ""
+        page = FakePage(FakeField())
+        error = SimpleNamespace(is_visible=AsyncMock(return_value=True))
+        page.get_by_text = lambda pattern: FakeInputs([error])
+        with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
+            with self.assertRaisesRegex(RuntimeError, "rejected the saved login"):
+                await agent._dream(page)
+        sleep.assert_not_awaited()
+        self.assertFalse(agent._reddit_authenticated)
+
+    async def test_anonymous_home_does_not_count_as_login(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+        page.url = "https://www.reddit.com/"
+        page.evaluate = AsyncMock(side_effect=[None, "Test"])
+        with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
+            await agent._wait_for_reddit_home(page)
+        self.assertEqual(page.evaluate.await_count, 2)
+        sleep.assert_awaited_once_with(1)
+        self.assertTrue(agent._reddit_authenticated)
+
+    async def test_http_rejection_never_starts_hold(self):
+        agent = dreamer()
+        agent.state.query = ""
+        agent._reddit_login_http_status = 400
+        with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+                await agent._dream(FakePage(FakeField()))
+        sleep.assert_not_awaited()
+
+    async def test_confirmation_timeout_never_starts_hold(self):
+        agent = dreamer()
+        agent.state.query = ""
+        with (
+            patch("backend.agent.REDDIT_LOGIN_TIMEOUT_SECONDS", 0),
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            with self.assertRaises(TimeoutError):
+                await agent._dream(FakePage(FakeField()))
+        sleep.assert_not_awaited()
+
+    async def test_delayed_home_navigation_precedes_identity_check(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+        page.url = REDDIT_LOGIN_URL
+        page.evaluate = AsyncMock(return_value="Test")
+
+        async def navigate(_delay):
+            page.evaluate.assert_not_awaited()
+            page.url = "https://www.reddit.com/"
+
+        with patch("backend.agent.asyncio.sleep", side_effect=navigate):
+            await agent._wait_for_reddit_home(page)
+        page.evaluate.assert_awaited_once()
+        self.assertTrue(agent._reddit_authenticated)
 
     async def test_copies_matching_temp_mail_input(self):
         agent = dreamer()

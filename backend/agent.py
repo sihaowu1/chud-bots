@@ -14,7 +14,12 @@ import uuid
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import (
+    Error as PlaywrightError,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    async_playwright,
+)
 
 from . import agent_state_store, events, steel_client
 from .personas import DWELL_DEEP, DWELL_LANDING, DWELL_SERP, Persona, dwell
@@ -23,9 +28,11 @@ SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
 REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
 REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
+REDDIT_HOME_URL = "https://www.reddit.com/"
 CAPTCHA_SOLVE_TIMEOUT_SECONDS = 60
 CAPTCHA_POLL_INTERVAL_SECONDS = 1
 LOGIN_ONLY_DWELL_SECONDS = 10
+REDDIT_LOGIN_TIMEOUT_SECONDS = 60
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -73,6 +80,8 @@ class Dreamer:
         self._stop = asyncio.Event()
         self.task: asyncio.Task | None = None
         self._email_copied = False
+        self._reddit_authenticated = False
+        self._reddit_login_http_status: int | None = None
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -93,7 +102,7 @@ class Dreamer:
         session = None
         try:
             self._emit(0, "waking up a Steel session")
-            session = await steel_client.create_session()
+            session = await steel_client.create_session(persona=self.persona.name, interactive=True)
             self.state.session = steel_client.session_summary(session)
             self._emit(0, f"session {session.id[:8]} live")
 
@@ -124,6 +133,13 @@ class Dreamer:
     async def _prepare_reddit_access(self, page: Page) -> None:
         """Log in with complete saved credentials, otherwise run signup."""
         saved = agent_state_store.load_or_create(self.persona.name)
+        if (saved.get("steel") or {}).get("profile_id"):
+            self._emit(note="checking Reddit login restored from Steel profile", url=REDDIT_HOME_URL)
+            await page.goto(REDDIT_HOME_URL, wait_until="domcontentloaded")
+            if await self._reddit_username(page):
+                self._reddit_authenticated = True
+                self._emit(0, "restored signed-in Reddit home page from Steel profile", page.url)
+                return
         email = saved.get("email")
         address = email.get("address") if isinstance(email, dict) else None
         password = email.get("password") if isinstance(email, dict) else None
@@ -264,9 +280,21 @@ class Dreamer:
     async def _login_reddit(self, page: Page, address: str, password: str) -> None:
         """Submit a saved email and password through Reddit's login page."""
         self._check_stop()
-        self._emit(note="opening Reddit login", url=REDDIT_LOGIN_URL)
-        await page.goto(REDDIT_LOGIN_URL, wait_until="domcontentloaded")
+        self._emit(note="opening Reddit home before login", url=REDDIT_HOME_URL)
+        await page.goto(REDDIT_HOME_URL, wait_until="domcontentloaded")
         await self._solve_reddit_captcha(page)
+        login_link = page.get_by_role(
+            "link", name=re.compile(r"^\s*log\s*in\s*$", re.IGNORECASE)
+        ).first
+        try:
+            await login_link.wait_for(state="visible", timeout=15_000)
+        except PlaywrightTimeoutError:
+            await self._solve_reddit_captcha(page)
+            await login_link.wait_for(state="visible", timeout=15_000)
+        await asyncio.sleep(2)
+        self._check_stop()
+        await login_link.click()
+        self._emit(note="opened login from Reddit home page", url=page.url)
 
         identity_field = page.locator(
             'input[name="username"], input[name="email"], input[type="email"], '
@@ -275,6 +303,8 @@ class Dreamer:
         try:
             await identity_field.wait_for(state="visible", timeout=15_000)
         except Exception:
+            # Reddit's challenge may appear after the initial status check.
+            await self._solve_reddit_captcha(page)
             identity_field = page.get_by_role(
                 "textbox", name=re.compile(r"username|email", re.IGNORECASE)
             ).first
@@ -288,13 +318,86 @@ class Dreamer:
 
         await identity_field.fill(address)
         await password_field.fill(password)
+        if (
+            await identity_field.input_value() != address
+            or await password_field.input_value() != password
+        ):
+            raise RuntimeError("Reddit login fields changed before submission")
         submit = page.get_by_role(
             "button", name=re.compile(r"^\s*log\s*in\s*$", re.IGNORECASE)
         ).first
-        await submit.click()
-        self._emit(note="submitted saved Reddit login", url=page.url)
-        await asyncio.sleep(3)
-        self._check_stop()
+
+        def record_login_response(response):
+            if urlparse(response.url).path == "/svc/shreddit/account/login":
+                self._reddit_login_http_status = response.status
+
+        self._reddit_login_http_status = None
+        page.on("response", record_login_response)
+        try:
+            await submit.click()
+            self._emit(note="submitted saved Reddit login", url=page.url)
+            await self._wait_for_reddit_home(page)
+        finally:
+            page.remove_listener("response", record_login_response)
+
+    async def _wait_for_reddit_home(self, page: Page) -> None:
+        """Require the home page and a server-confirmed identity before success."""
+        self._emit(note="waiting for signed-in Reddit home page")
+        deadline = asyncio.get_running_loop().time() + REDDIT_LOGIN_TIMEOUT_SECONDS
+        next_captcha_check = asyncio.get_running_loop().time() + 5
+        errors = page.get_by_text(
+            re.compile(
+                r"invalid (?:email|username|password).*|incorrect (?:username|password).*|"
+                r"too many (?:requests|attempts).*|.*try again (?:later|in a few).*|"
+                r".*disable any extensions.*",
+                re.IGNORECASE,
+            )
+        )
+        while asyncio.get_running_loop().time() < deadline:
+            self._check_stop()
+            if self._reddit_login_http_status and self._reddit_login_http_status >= 400:
+                raise RuntimeError(
+                    f"Reddit rejected the login request (HTTP {self._reddit_login_http_status}); "
+                    "signed-in home page was not reached"
+                )
+            if asyncio.get_running_loop().time() >= next_captcha_check:
+                await self._solve_reddit_captcha(page)
+                next_captcha_check = asyncio.get_running_loop().time() + 5
+            try:
+                for index in range(await errors.count()):
+                    if await errors.nth(index).is_visible():
+                        raise RuntimeError(
+                            "Reddit rejected the saved login or browser session; "
+                            "signed-in home page was not reached"
+                        )
+                url = urlparse(page.url)
+                if url.hostname == "www.reddit.com" and url.path in ("", "/"):
+                    username = await self._reddit_username(page)
+                    if isinstance(username, str) and username:
+                        self._reddit_authenticated = True
+                        self._emit(0, "confirmed signed-in Reddit home page", page.url)
+                        return
+            except PlaywrightError:
+                # Navigation can replace the document while checking it.
+                pass
+            await asyncio.sleep(1)
+        raise TimeoutError("Reddit did not reach a confirmed signed-in home page within 60 seconds")
+
+    async def _reddit_username(self, page: Page) -> str | None:
+        """Check the server identity without exposing cookies or auth tokens."""
+        try:
+            username = await page.evaluate("""async () => {
+                try {
+                    const response = await fetch('/api/me.json', {
+                        credentials: 'same-origin', signal: AbortSignal.timeout(5000)
+                    });
+                    if (!response.ok) return null;
+                    return (await response.json())?.data?.name || null;
+                } catch { return null; }
+            }""")
+        except PlaywrightError:
+            return None
+        return username if isinstance(username, str) and username else None
 
     async def _solve_reddit_captcha(self, page: Page) -> None:
         """Detect a Reddit login CAPTCHA and let Steel solve it before typing."""
@@ -351,6 +454,8 @@ class Dreamer:
 
     async def _dream(self, page: Page) -> None:
         if not self.state.query.strip():
+            if not self._reddit_authenticated:
+                await self._wait_for_reddit_home(page)
             self._emit(0, "holding logged-in session for 10 seconds", page.url)
             await asyncio.sleep(LOGIN_ONLY_DWELL_SECONDS)
             self._check_stop()

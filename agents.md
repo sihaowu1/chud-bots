@@ -82,6 +82,15 @@ uv run uvicorn backend.main:app --reload
 Open http://127.0.0.1:8000. No local Chromium is needed: Playwright connects
 to Steel's browser over CDP, so `playwright install` is not required.
 
+Login debugging is temporarily limited to one dreamer, Yusuf, in both the UI
+and launch API. Login uses the saved email address and password.
+It opens Reddit's home page and clicks Log In before entering credentials.
+Login succeeds only when Reddit's home page is loaded and `/api/me.json`
+confirms a signed-in identity. The login-only 10-second hold starts then;
+rejected credentials or a 60-second confirmation timeout fail the run.
+Run `uv run python scripts/check_yusuf_login.py` for one live login check with
+a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
+
 ## API
 
 | method | path                      | body / notes |

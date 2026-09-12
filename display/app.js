@@ -44,18 +44,10 @@ function render(a) {
   }
 
   card.dataset.status = a.status;
-  $(".status", card).textContent = a.status;
-  $(".note", card).textContent = a.note;
 
   const link = $(".url a", card);
   link.textContent = a.url || "";
   if (a.url) link.href = a.url;
-
-  $$(".depth span", card).forEach((s) => {
-    const l = Number(s.dataset.l);
-    s.classList.toggle("on", l < a.level);
-    s.classList.toggle("cur", l === a.level && a.status === "running");
-  });
 
   const viewer = $(".viewer", card);
   const frame = $("iframe", viewer);
@@ -69,10 +61,7 @@ function render(a) {
     viewer.classList.remove("live");
     $(".placeholder", viewer).textContent = "session released";
   }
-  if (a.note) log(`[${a.persona}] L${a.level} ${a.note}`, a.status === "failed");
 }
-
-function $$(s, el = document) { return [...el.querySelectorAll(s)]; }
 
 function updateCounts() {
   const n = [...cards.values()].filter((c) => c.dataset.status === "running").length;
