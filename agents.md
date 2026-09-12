@@ -59,7 +59,7 @@ npm run build && npm run lint                   # both must be clean
 
 | path | role |
 |------|------|
-| `src/app/(app)/*` | routes: dashboard `/`, campaign, activity, opportunities, agents (list + network), discoverability, analytics, settings |
+| `src/app/(app)/*` | routes: dashboard `/`, campaign, **activity** (live browser sessions), **logs** (agent event feed), opportunities, agents (list + network), discoverability, analytics, settings |
 | `src/app/globals.css` | design tokens. Single dark theme, neutral surfaces, one accent (`--signal`), semantic success/warning/danger. Keyframes for row entry/flash. |
 | `src/lib/types.ts` | domain model: Campaign, Agent, ActivityEvent, PlannedTask, Opportunity… |
 | `src/lib/mock/*` | seed data. `agents.ts` holds the deploy order + `allocationFor(n)`; `content.ts` the thread/query pools the simulator draws from. |
@@ -67,7 +67,8 @@ npm run build && npm run lint                   # both must be clean
 | `src/lib/store.ts` | zustand store. `hydrate()` seeds history on the client (never at module load — timestamps must not differ between SSR and client). `tick()` applies one emission. |
 | `src/lib/sim/use-simulation.ts` | mounts the 2–5 s tick loop once, in `AppShell`. |
 | `src/components/shell/*` | sidebar, top bar (campaign switcher, live state, pause-all with confirm), notifications, ⌘K palette. |
-| `src/components/activity/*` | the live feed. `activity-feed.tsx` holds back new rows while the user is scrolled or inspecting and shows "N new events ↓" instead. |
+| `src/components/logs/*` | the event feed (Logs page + dashboard). `activity-feed.tsx` holds back new rows while the user is scrolled or inspecting and shows "N new events ↓" instead. |
+| `src/lib/sessions/*` + `src/components/activity/*` | the Activity page: a wall of the dreamers' cloud-browser sessions from the `agent-login` backend. `store.ts` polls `/backend/api/agents` (+ SSE `/backend/api/events`) and embeds each Steel `debug_url` in an iframe; if the backend is unreachable it runs `mock.ts`, which replays the same Temp-Mail → Reddit signup/login → CAPTCHA → Google → land → deepen script with a sketched viewer. `next.config.ts` rewrites `/backend/*` to `BACKEND_URL` (default `http://127.0.0.1:8000`) because the FastAPI app has no CORS. |
 | `src/components/shared/*` | primitives: status dots, animated numbers, score, inspector panel, toast with undo, section/panel/field. |
 
 Conventions that matter here:

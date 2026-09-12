@@ -9,6 +9,7 @@ import {
   Compass,
   LayoutGrid,
   Radar,
+  ScrollText,
   Settings,
   Target,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
   { href: "/campaign", label: "Campaign", icon: Target },
   { href: "/activity", label: "Activity", icon: Activity },
+  { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/opportunities", label: "Opportunities", icon: Compass },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/discoverability", label: "Discoverability", icon: Radar },

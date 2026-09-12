@@ -12,7 +12,7 @@ import { AgentTable } from "@/components/agents/agent-table";
 import { AgentDetail } from "@/components/agents/agent-detail";
 import { AgentNetwork } from "@/components/agents/agent-network";
 import { AllocationPanel } from "@/components/agents/allocation-panel";
-import { ActivityFeed } from "@/components/activity/activity-feed";
+import { ActivityFeed } from "@/components/logs/activity-feed";
 import { AgentStatusBadge } from "@/components/shared/agent-status";
 import { useHotkey } from "@/hooks/use-hotkey";
 import { cn } from "@/lib/utils";

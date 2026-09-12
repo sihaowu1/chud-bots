@@ -11,7 +11,7 @@ import { SectionHeader } from "@/components/shared/section";
 import { CampaignSummary } from "@/components/dashboard/campaign-summary";
 import { AgentsDeployed } from "@/components/dashboard/agents-deployed";
 import { AgentPlan } from "@/components/dashboard/agent-plan";
-import { ActivityFeed } from "@/components/activity/activity-feed";
+import { ActivityFeed } from "@/components/logs/activity-feed";
 
 export default function DashboardPage() {
   const campaign = useSim((s) => s.campaign);
@@ -55,7 +55,7 @@ export default function DashboardPage() {
               subtitle="What every agent is doing right now"
             />
             <Link
-              href="/activity"
+              href="/logs"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
               Full view

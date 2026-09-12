@@ -40,6 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           d: "/",
           c: "/campaign",
           a: "/activity",
+          l: "/logs",
           o: "/opportunities",
           g: "/agents",
           v: "/discoverability",

@@ -10,6 +10,7 @@ import {
   Pause,
   Play,
   Radar,
+  ScrollText,
   Settings,
   Target,
   Zap,
@@ -65,6 +66,9 @@ export function CommandPalette({ open, onOpenChange }: Props) {
             </CommandItem>
             <CommandItem onSelect={() => go("/activity")}>
               <Activity /> Activity <CommandShortcut>G A</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={() => go("/logs")}>
+              <ScrollText /> Logs <CommandShortcut>G L</CommandShortcut>
             </CommandItem>
             <CommandItem onSelect={() => go("/opportunities")}>
               <Compass /> Opportunities <CommandShortcut>G O</CommandShortcut>
