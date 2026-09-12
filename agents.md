@@ -21,9 +21,11 @@ summarization.
 
 The code implements the earlier search-traffic prototype and a model-backed
 campaign coordinator. The coordinator reads this file and the durable agent
-ledgers, then assigns `create_post`, `comment`, or `wait` tasks. Executor
-adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
-implemented. Keep that distinction explicit when changing this document or
+ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone
+Reddit author adapter supports disclosed test posts and top-level comments in
+r/HackathonsCanada through a logged-in Steel browser. It is not yet wired to
+campaign assignments; AI Overview evaluation is not implemented.
+Keep that distinction explicit when changing this document or
 presenting the project.
 
 ## Layout
@@ -52,6 +54,7 @@ is the only file that imports the Steel SDK.
 | `config.py`      | `.env` loading and constants. |
 | `orchestrator_agent.py` | GPT-backed campaign task planning, continuation, and durable run audit. It does not post. |
 | `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
+| `reddit_author.py` | Browser-driven test posts/comments, identity checks, verification, and durable submission receipts. |
 
 ### display/
 
@@ -131,6 +134,14 @@ a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 
 ## API
 
+Read-only Reddit browsing can be checked separately with
+`uv run python scripts/check_yusuf_reddit.py --query python`. This uses one
+Yusuf Steel session and his saved credentials/profile, scrolls the home page,
+then navigates to community search results and scrolls them. Screenshots go to
+`scripts/reddit-check/` (gitignored); the session is released afterward.
+`backend/reddit_browser.py` provides the navigation helpers. This check does
+not vote, post, or comment, and does not alter the existing launch flow.
+
 | method | path                      | body / notes |
 |--------|---------------------------|--------------|
 | POST   | `/api/runs`               | `{target, queries[], count}` -> launches `count` dreamers, queries cycled; an empty `queries` list runs only the Reddit login flow |
@@ -146,6 +157,44 @@ a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 | POST   | `/api/orchestrations/{id}/activity` | executor callback; records username/content/URLs/timestamps and re-plans by default |
 
 ## Campaign coordinator
+
+### Standalone Reddit authoring
+
+Any named persona with a saved Reddit login/Steel profile can publish through
+`scripts/reddit_publish.py`. This separate runner does not use the launch UI.
+It restores the persona profile, checks the signed-in identity, fills Reddit's
+browser composer, clicks once, verifies the saved content, and releases Steel.
+All content includes an automated-demo disclosure and targets r/HackathonsCanada.
+Once the community is private, the account must have access granted by its owner.
+Pass `--dry-run` before `post` or `comment` to fill the composer and check its
+submit control without clicking or creating a submission receipt.
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Cobb --request-id question-001 post --title "Anyone doing Battle of the Schools?" --body "What are you planning to build?"
+uv run python scripts/reddit_publish.py --persona Arthur --request-id reply-001 comment --post-url "https://www.reddit.com/r/HackathonsCanada/comments/POST_ID/POST_SLUG/" --body "Testing the comment workflow."
+```
+
+Use the same `--request-id` when repeating a command. Confirmed requests return
+their existing permalink; a reused ID with different content is rejected.
+Receipts live in the gitignored `backend/agent_states/reddit_receipts/` directory.
+A timeout after the submit attempt leaves an uncertain receipt and blocks repeat
+submission. Inspect Reddit first. An observed post ID can be reconciled without
+another write to Reddit:
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Cobb --request-id question-001 reconcile-post --post-id t3_POST_ID
+```
+
+Confirmed submissions also enter the persona activity ledger. Screenshots are
+saved to `scripts/reddit-check/`. Confirmation means Reddit saved the content;
+moderation can still filter it, and results include `removed_by_category` for posts.
+Comments currently support top-level replies to post permalinks only. Uncertain
+comment receipts require manual inspection; there is no automatic resubmission.
+Call `RedditAuthor(dreamer, page).create_post(...)` or `.comment(...)` to reuse
+the adapter in an existing authenticated Steel session. Serialize publishing
+operations for each persona/profile; different request IDs are independent.
+
+### Planning
 
 Set `OPENAI_API_KEY`, then send the user's campaign prompt to
 `POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium
