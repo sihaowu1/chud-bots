@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 .dist/
+backend/agent_states/
+backend/orchestrator_runs/
+scripts/yusuf-login.png
+scripts/yusuf-profile.png

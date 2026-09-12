@@ -35,7 +35,7 @@ function render(a) {
     card.dataset.id = a.id;
     $(".persona", card).textContent = a.persona;
     $(".traits", card).textContent = a.traits.join(" · ");
-    $(".query", card).textContent = `"${a.query}"`;
+    $(".query", card).textContent = a.query ? `"${a.query}"` : "login only";
     card.dataset.mobile = a.traits.includes("mobile");
     $(".stop", card).onclick = () => fetch(`/api/agents/${a.id}/stop`, { method: "POST" });
     $(".empty", grid)?.remove();
@@ -44,18 +44,10 @@ function render(a) {
   }
 
   card.dataset.status = a.status;
-  $(".status", card).textContent = a.status;
-  $(".note", card).textContent = a.note;
 
   const link = $(".url a", card);
   link.textContent = a.url || "";
   if (a.url) link.href = a.url;
-
-  $$(".depth span", card).forEach((s) => {
-    const l = Number(s.dataset.l);
-    s.classList.toggle("on", l < a.level);
-    s.classList.toggle("cur", l === a.level && a.status === "running");
-  });
 
   const viewer = $(".viewer", card);
   const frame = $("iframe", viewer);
@@ -69,10 +61,7 @@ function render(a) {
     viewer.classList.remove("live");
     $(".placeholder", viewer).textContent = "session released";
   }
-  if (a.note) log(`[${a.persona}] L${a.level} ${a.note}`, a.status === "failed");
 }
-
-function $$(s, el = document) { return [...el.querySelectorAll(s)]; }
 
 function updateCounts() {
   const n = [...cards.values()].filter((c) => c.dataset.status === "running").length;
@@ -103,8 +92,15 @@ $("#launch").onsubmit = async (e) => {
   const f = e.target;
   const btn = $("button.primary", f);
   btn.disabled = true;
+  const subreddit = f.subreddit.value
+    .trim()
+    .replace(/^https?:\/\/(?:www\.)?reddit\.com\/r\//i, "")
+    .replace(/^\/?r\//i, "")
+    .replace(/^\/+|\/+$/g, "");
   const body = {
-    target: f.target.value.trim(),
+    target: subreddit
+      ? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}`
+      : "https://www.reddit.com",
     queries: f.queries.value.split("\n").map((s) => s.trim()).filter(Boolean),
     count: Number(f.count.value),
   };

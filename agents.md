@@ -4,15 +4,27 @@ Orientation for AI agents (and humans) working on this repo.
 
 ## What this is
 
-Hackathon project. The pitch: *Inception*, but for search engines. A fleet of
-Steel.dev cloud browsers ("dreamers") each search Google for a phrase, click the
-target site from the results, and browse it the way a person would. The goal is
-for those visits to look like organic traffic. The display shows every dreamer's
-live browser as it happens.
+Hackathon project. The pitch is *Inception*, but for search and generative
+answers: a fleet of Steel.dev cloud-browser agents adopts distinct fictional
+personas and demonstrates how repeated Reddit-style discussion could influence
+what a search engine's AI Overview says. The narrative end state is an AI
+Overview that answers that **Inception won Battle of the Schools, the hackathon
+between Waterloo and U of T**. The display shows every dreamer's live browser
+as the demonstration unfolds.
 
-Caveat worth knowing: Google treats this kind of traffic as manipulation and
-filters for it. Treat this as a demo of Steel's multi-session tooling, not a
-guaranteed ranking lever.
+The personas are synthetic characters for the demo, not real people. Their
+different voices, interests, and browsing patterns make each agent legible on
+screen and illustrate how distributed online discussion can shape retrieval and
+summarization.
+
+### Current implementation
+
+The code implements the earlier search-traffic prototype and a model-backed
+campaign coordinator. The coordinator reads this file and the durable agent
+ledgers, then assigns `create_post`, `comment`, or `wait` tasks. Executor
+adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
+implemented. Keep that distinction explicit when changing this document or
+presenting the project.
 
 ## Layout
 
@@ -34,10 +46,12 @@ is the only file that imports the Steel SDK.
 | `main.py`        | FastAPI app. REST endpoints, SSE stream at `/api/events`, serves `display/`. |
 | `orchestrator.py`| Registry of running dreamers. `launch`, `stop`, `stop_all`, `clear_finished`. Enforces `MAX_AGENTS`. |
 | `agent.py`       | `Dreamer`: one Steel session driven through the dream levels with Playwright over CDP. |
-| `personas.py`    | Behaviour profiles (typing speed, mobile/desktop, scroll habits, link depth). |
+| `personas.py`    | Behaviour profiles (typing speed, scroll habits, link depth). Steel sessions currently use desktop devices. |
 | `steel_client.py`| Thin wrapper over `steel-sdk`: create / release / list sessions. |
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
+| `orchestrator_agent.py` | GPT-backed campaign task planning, continuation, and durable run audit. It does not post. |
+| `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
 
 ### display/
 
@@ -86,7 +100,7 @@ Conventions that matter here:
 
 | level | name   | what happens |
 |-------|--------|--------------|
-| 0     | wake   | Steel session created, Playwright attached via `session.websocket_url` |
+| 0     | wake   | Steel session created and Playwright attached via `session.websocket_url`. Complete saved email/password credentials go through Reddit login; otherwise a Temp-Mail address is copied into Reddit signup and the local ledger generates a persona password. |
 | 1     | search | Google opened, consent dismissed, query typed with per-keystroke delay, Enter |
 | 2     | land   | First result whose href contains the target host is clicked. If absent, navigates directly and logs "weak signal". |
 | 3+    | deepen | Scroll, dwell, click a random internal link; repeat up to `persona.max_depth` |
@@ -106,21 +120,48 @@ uv run uvicorn backend.main:app --reload
 Open http://127.0.0.1:8000. No local Chromium is needed: Playwright connects
 to Steel's browser over CDP, so `playwright install` is not required.
 
+Login debugging is temporarily limited to one dreamer, Yusuf, in both the UI
+and launch API. Login uses the saved email address and password.
+It opens Reddit's home page and clicks Log In before entering credentials.
+Login succeeds only when Reddit's home page is loaded and `/api/me.json`
+confirms a signed-in identity. The login-only 10-second hold starts then;
+rejected credentials or a 60-second confirmation timeout fail the run.
+Run `uv run python scripts/check_yusuf_login.py` for one live login check with
+a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
+
 ## API
 
 | method | path                      | body / notes |
 |--------|---------------------------|--------------|
-| POST   | `/api/runs`               | `{target, queries[], count}` -> launches `count` dreamers, queries cycled |
+| POST   | `/api/runs`               | `{target, queries[], count}` -> launches `count` dreamers, queries cycled; an empty `queries` list runs only the Reddit login flow |
 | GET    | `/api/agents`             | current snapshots |
 | POST   | `/api/agents/{id}/stop`   | cooperative stop; session released |
 | POST   | `/api/stop-all`           | stops everything, then `sessions.release_all()` on Steel |
 | POST   | `/api/clear`              | drops finished/failed/stopped agents from the registry |
 | GET    | `/api/steel/sessions`     | live sessions straight from Steel (sanity check) |
 | GET    | `/api/events`             | SSE. First message is `{kind:"snapshot"}`, then `agent` / `log` events |
+| POST   | `/api/orchestrations`     | `{prompt, personas?, environment}` -> first task-plan phase |
+| GET    | `/api/orchestrations/{id}` | durable plan, activity, and agent-ledger snapshot |
+| POST   | `/api/orchestrations/{id}/continue` | re-plan from the latest ledgers |
+| POST   | `/api/orchestrations/{id}/activity` | executor callback; records username/content/URLs/timestamps and re-plans by default |
+
+## Campaign coordinator
+
+Set `OPENAI_API_KEY`, then send the user's campaign prompt to
+`POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium
+reasoning by default; both values can be overridden with
+`ORCHESTRATOR_MODEL` and `ORCHESTRATOR_REASONING_EFFORT`.
+
+Each phase produces assignments only. A future mock/private-environment adapter
+executes them and reports results through the activity endpoint. Every persona
+has a JSON ledger under `backend/agent_states/` containing its Reddit username,
+assignments, and timestamped post/comment/wait activity. Each orchestration also
+has an aggregate JSON audit under `backend/orchestrator_runs/`. Credentials are
+kept out of the context sent to the model.
 
 ## Steel specifics that bit us
 
-- Sessions are created with `use_proxy`, `solve_captcha`, `stealth_config.humanizeInteractions`
+- Desktop sessions are created with `use_proxy`, `solve_captcha`, `stealth_config.humanizeInteractions`
   and `debug_config.interactive=false`. See `steel_client.create_session`.
 - `session.websocket_url` is the CDP endpoint; pass it straight to `connect_over_cdp`.
 - `session.debug_url` is embeddable in an iframe. `session_viewer_url` is the

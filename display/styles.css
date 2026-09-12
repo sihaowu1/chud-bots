@@ -49,6 +49,7 @@ input, textarea {
   padding: 0.5rem 0.6rem; font: inherit; font-size: 0.9rem;
 }
 input:focus, textarea:focus { outline: 1px solid var(--accent); }
+input[readonly] { color: var(--muted); cursor: default; }
 button {
   background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 0.5rem 0.75rem; font: inherit; cursor: pointer;

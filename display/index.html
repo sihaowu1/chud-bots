@@ -23,13 +23,16 @@
     <aside class="panel">
       <form id="launch">
         <label>Target site
-          <input name="target" placeholder="https://example.com" required />
+          <input value="https://www.reddit.com" readonly aria-readonly="true" />
         </label>
-        <label>Search queries <small>(one per line, cycled across agents)</small>
-          <textarea name="queries" rows="4" placeholder="best cold brew subscription&#10;cold brew delivered monthly" required></textarea>
+        <label>Subreddit <small>(optional)</small>
+          <input name="subreddit" placeholder="e.g. uwaterloo" autocomplete="off" />
+        </label>
+        <label>Search queries <small>(optional; leave blank for login only)</small>
+          <textarea name="queries" rows="4" placeholder="best cold brew subscription&#10;cold brew delivered monthly"></textarea>
         </label>
         <label>Dreamers
-          <input name="count" type="number" min="1" max="50" value="3" />
+          <input name="count" type="number" min="1" max="1" value="1" readonly />
         </label>
         <button type="submit" class="primary">Go under</button>
         <div class="row">
@@ -66,16 +69,11 @@
           <span class="persona"></span>
           <span class="traits"></span>
         </div>
-        <span class="status"></span>
       </header>
       <div class="viewer">
         <iframe title="live session" allow="autoplay" loading="lazy"></iframe>
         <div class="placeholder">waiting for session…</div>
       </div>
-      <div class="depth" aria-label="dream level">
-        <span data-l="0"></span><span data-l="1"></span><span data-l="2"></span><span data-l="3"></span><span data-l="4"></span><span data-l="5"></span>
-      </div>
-      <p class="note"></p>
       <p class="url"><a target="_blank" rel="noopener"></a></p>
       <footer>
         <span class="query"></span>

@@ -10,7 +10,7 @@ _agents: dict[str, Dreamer] = {}
 
 
 def live_count() -> int:
-    return sum(1 for d in _agents.values() if d.state.status == "running")
+    return sum(1 for d in _agents.values() if d.state.status in ("queued", "running"))
 
 
 def snapshot() -> list[dict]:
@@ -24,14 +24,18 @@ def launch(target: str, queries: list[str], count: int) -> list[dict]:
         raise RuntimeError(f"at MAX_AGENTS={config.MAX_AGENTS}; stop some first")
 
     launched = []
-    query_cycle = itertools.cycle(queries)
+    normalized_queries = [query.strip() for query in queries if query.strip()]
+    # An empty query is an explicit login-only run. Keep one sentinel value so
+    # the normal persona-cycling launch path still applies.
+    query_cycle = itertools.cycle(normalized_queries or [""])
     for persona in personas.pick(count):
         d = Dreamer(persona, next(query_cycle), target)
         _agents[d.state.id] = d
         d.task = asyncio.create_task(d.run(), name=f"dreamer-{d.state.id}")
         launched.append(d.state.snapshot())
         events.publish("agent", agent=d.state.snapshot())
-    events.publish("log", msg=f"launched {count} dreamer(s) toward {target}")
+    mode = f"toward {target}" if normalized_queries else "in login-only mode"
+    events.publish("log", msg=f"launched {count} dreamer(s) {mode}")
     return launched
 
 
