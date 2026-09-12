@@ -29,7 +29,9 @@ TEMP_MAIL_URL = "https://temp-mail.org/en/"
 REDDIT_SIGNUP_URL = "https://www.reddit.com/register/"
 REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
 REDDIT_HOME_URL = "https://www.reddit.com/"
-CAPTCHA_SOLVE_TIMEOUT_SECONDS = 60
+# Workaround: Steel's CAPTCHA status can remain stuck on solving even after
+# Reddit has successfully logged in. Keep this timeout effectively out of the way.
+CAPTCHA_SOLVE_TIMEOUT_SECONDS = 10_000_000
 CAPTCHA_POLL_INTERVAL_SECONDS = 1
 LOGIN_ONLY_DWELL_SECONDS = 10
 REDDIT_LOGIN_TIMEOUT_SECONDS = 60
@@ -450,7 +452,9 @@ class Dreamer:
                 return
             await asyncio.sleep(CAPTCHA_POLL_INTERVAL_SECONDS)
 
-        raise TimeoutError("Steel did not solve the Reddit CAPTCHA within 60 seconds")
+        raise TimeoutError(
+            f"Steel did not solve the Reddit CAPTCHA within {CAPTCHA_SOLVE_TIMEOUT_SECONDS} seconds"
+        )
 
     async def _dream(self, page: Page) -> None:
         if not self.state.query.strip():
