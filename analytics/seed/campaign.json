@@ -1,0 +1,25 @@
+{
+  "id": "cmp_flowpilot",
+  "name": "FlowPilot AI",
+  "type": "Product",
+  "typeLabel": "Software Product",
+  "url": "flowpilot.ai",
+  "description": "AI agents that automate repetitive business workflows.",
+  "audience": ["Startup founders", "Small businesses", "Operations teams"],
+  "whyCare": "Teams lose hours each week on copy-paste work between tools. FlowPilot runs those processes end-to-end with agents that adapt when the inputs change, instead of brittle trigger-action recipes.",
+  "problems": [
+    "Repetitive admin and data-entry work",
+    "Brittle Zap-style automations that break on edge cases",
+    "Multi-step processes that need judgment, not just triggers"
+  ],
+  "searchIntent": [
+    "Zapier alternatives",
+    "AI workflow automation",
+    "automation for small business",
+    "best tools for repetitive work"
+  ],
+  "topics": ["AI agents", "Workflow automation", "Productivity", "Business automation"],
+  "related": ["Zapier", "Make", "n8n"],
+  "avoid": ["Crypto", "MLM / get-rich-quick", "Political discussions"],
+  "status": "running"
+}

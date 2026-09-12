@@ -2,6 +2,12 @@
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight } from "lucide-react";
 import { QUERY_PRESENCE } from "@/lib/mock/discoverability";
+import { BackendState } from "@/components/analytics/backend-state";
+import { hasMeasurements, useAnalytics } from "@/lib/analytics/store";
+
+// Mention counts aren't produced by the backend yet, so they stay static; every
+// other column comes from the presence probes.
+const STATIC_MENTIONS = new Map(QUERY_PRESENCE.map((q) => [q.query, q.mentions]));
 import type { QueryPresence } from "@/lib/types";
 import { StatusDot, type Tone } from "@/components/shared/status-dot";
 import { cn } from "@/lib/utils";
@@ -89,6 +95,10 @@ function Trend({
 }
 
 export function QueryTable() {
+  const connection = useAnalytics((s) => s.connection);
+  const rows = useAnalytics((s) => s.queries);
+  const series = useAnalytics((s) => s.series);
+
   return (
     <div className="min-w-[860px]">
       <div
@@ -104,30 +114,36 @@ export function QueryTable() {
         <span className="justify-self-end">Mentions</span>
         <span className="justify-self-end">7d trend</span>
       </div>
-      <div className="divide-y divide-border/60">
-        {QUERY_PRESENCE.map((q) => (
-          <div
-            key={q.query}
-            className={cn(
-              "grid h-10 items-center gap-4 px-5 text-xs transition-colors hover:bg-foreground/[0.03]",
-              GRID,
-            )}
-          >
-            <span className="truncate font-mono text-foreground">
-              “{q.query}”
-            </span>
-            <Presence value={q.reddit} />
-            <SearchLevel value={q.search} />
-            <Presence value={q.aiAnswer} />
-            <span className="justify-self-end font-mono text-foreground tnum">
-              {q.mentions}
-            </span>
-            <span className="justify-self-end">
-              <Trend trend={q.trend} delta={q.delta7d} />
-            </span>
-          </div>
-        ))}
-      </div>
+      <BackendState
+        connection={connection}
+        empty={rows.length === 0 || !hasMeasurements(series)}
+        height={180}
+      >
+        <div className="divide-y divide-border/60">
+          {rows.map((q) => (
+            <div
+              key={q.query}
+              className={cn(
+                "grid h-10 items-center gap-4 px-5 text-xs transition-colors hover:bg-foreground/[0.03]",
+                GRID,
+              )}
+            >
+              <span className="truncate font-mono text-foreground">
+                “{q.query}”
+              </span>
+              <Presence value={q.reddit} />
+              <SearchLevel value={q.search} />
+              <Presence value={q.aiAnswer} />
+              <span className="justify-self-end font-mono text-foreground tnum">
+                {STATIC_MENTIONS.get(q.query) ?? "—"}
+              </span>
+              <span className="justify-self-end">
+                <Trend trend={q.trend} delta={q.delta7d} />
+              </span>
+            </div>
+          ))}
+        </div>
+      </BackendState>
     </div>
   );
 }

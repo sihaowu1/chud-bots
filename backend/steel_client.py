@@ -19,8 +19,14 @@ def client() -> AsyncSteel:
     return _client
 
 
-async def create_session(*, persona: str | None = None, interactive: bool = False) -> Session:
-    """Spin up a stealth, proxied desktop Steel browser."""
+async def create_session(
+    *, persona: str | None = None, interactive: bool = False, region: str | None = None
+) -> Session:
+    """Spin up a stealth, proxied desktop Steel browser.
+
+    `region` pins the exit node. The analytics search probe passes it so rank positions stay
+    comparable over time; dreamers leave it unset.
+    """
     profile_options = {}
     if persona:
         saved = agent_state_store.load_or_create(persona)
@@ -29,6 +35,8 @@ async def create_session(*, persona: str | None = None, interactive: bool = Fals
         if profile_id:
             await wait_for_profile_ready(profile_id)
             profile_options["profile_id"] = profile_id
+    if region:
+        profile_options["region"] = region
     session = await client().sessions.create(
         use_proxy=config.STEEL_USE_PROXY,
         solve_captcha=True,

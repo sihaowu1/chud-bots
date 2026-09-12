@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>cold brew subscription - Google Search</title></head>
+<body>
+<div id="searchform"></div>
+
+<!-- Top ads block: must be excluded -->
+<div id="tads">
+  <div data-text-ad="1"><a href="https://www.googleadservices.com/pagead/aclk?adurl=https://sponsor-one.com"><h3>Sponsor One — Buy Now</h3></a></div>
+  <div data-text-ad="1"><a href="https://sponsor-two.com/deal"><h3>Sponsor Two Coffee</h3></a></div>
+</div>
+
+<div id="search">
+  <div id="rso">
+
+    <!-- AI Overview with citation links: must be excluded -->
+    <div data-subtree="aio">
+      <a href="https://aio-citation.com/x"><h3>AI Overview source</h3></a>
+    </div>
+
+    <!-- Organic 1, with sitelinks that must NOT take their own positions -->
+    <div class="MjjYud" data-hveid="a1">
+      <div class="g">
+        <a href="/url?q=https://www.example.com/cold-brew&amp;sa=U"><h3>Example — Cold Brew Subscription</h3></a>
+        <div class="sitelinks">
+          <a href="https://www.example.com/pricing"><h3>Pricing</h3></a>
+          <a href="https://www.example.com/faq"><h3>FAQ</h3></a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Organic 2 -->
+    <div class="MjjYud" data-hveid="a2">
+      <div class="g"><a href="https://roaster-b.com/subs"><h3>Roaster B monthly coffee</h3></a></div>
+    </div>
+
+    <!-- Inline ad rendered inside the main column: must be excluded -->
+    <div class="MjjYud uEierd" data-hveid="ad1">
+      <a href="https://sponsor-three.com"><h3>Sponsor Three</h3></a>
+    </div>
+
+    <!-- People Also Ask: question links, no h3 in the answer anchors -->
+    <div class="MjjYud" data-hveid="paa">
+      <div jsname="Cpkphb" role="button"><span>What is cold brew?</span></div>
+    </div>
+
+    <!-- Organic 3 -->
+    <div class="MjjYud" data-hveid="a3">
+      <div class="g"><a href="https://roaster-c.co.uk/order"><h3>Roaster C UK delivery</h3></a></div>
+    </div>
+
+    <!-- A google-internal link that must be filtered by host -->
+    <div class="MjjYud" data-hveid="gi">
+      <a href="https://support.google.com/websearch"><h3>Google help</h3></a>
+    </div>
+
+    <!-- Organic 4: subdomain of the target, should still match the target domain -->
+    <div class="MjjYud" data-hveid="a4">
+      <div class="g"><a href="https://blog.example.com/how-we-brew"><h3>Example blog — how we brew</h3></a></div>
+    </div>
+
+    <!-- Organic 5 -->
+    <div class="MjjYud" data-hveid="a5">
+      <div class="g"><a href="https://roaster-d.com/x"><h3>Roaster D</h3></a></div>
+    </div>
+
+    <!-- javascript: href, must be skipped -->
+    <div class="MjjYud" data-hveid="js">
+      <a href="javascript:void(0)"><h3>More options</h3></a>
+    </div>
+
+  </div>
+</div>
+
+<!-- Right-hand knowledge panel and bottom ads: outside #rso, excluded by scoping -->
+<div id="rhs"><a href="https://knowledge-panel.com"><h3>Knowledge</h3></a></div>
+<div id="bottomads"><a href="https://sponsor-four.com"><h3>Sponsor Four</h3></a></div>
+</body></html>

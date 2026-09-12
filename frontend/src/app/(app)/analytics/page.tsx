@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import {
   Bar,
   BarChart,
@@ -26,12 +27,21 @@ import {
   REJECTION_SUMMARY,
   TOPIC_PERFORMANCE,
 } from "@/lib/mock/analytics";
-import { VISIBILITY_SERIES } from "@/lib/mock/discoverability";
+import { BackendState } from "@/components/analytics/backend-state";
+import { hasMeasurements, useAnalytics } from "@/lib/analytics/store";
 
 const totalRelevant = OPPORTUNITY_VOLUME.reduce((n, d) => n + d.relevant, 0);
 const totalScanned = OPPORTUNITY_VOLUME.reduce((n, d) => n + d.scanned, 0);
 
 export default function AnalyticsPage() {
+  // Visibility trend comes from the backend's presence probes. The other widgets
+  // measure opportunities/rejections the backend doesn't produce yet, so they
+  // stay on static data for now.
+  const start = useAnalytics((s) => s.start);
+  const connection = useAnalytics((s) => s.connection);
+  const series = useAnalytics((s) => s.series);
+  useEffect(() => start(), [start]);
+
   return (
     <div className="mx-auto max-w-[1480px] px-6 pb-8 pt-5">
       <PageHeader title="Analytics" description="Last 24 hours unless noted" />
@@ -96,9 +106,14 @@ export default function AnalyticsPage() {
           subtitle="Inception score, last 14 days"
         >
           <div style={{ height: 240 }}>
+            <BackendState
+              connection={connection}
+              empty={!hasMeasurements(series)}
+              height={240}
+            >
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
-                data={VISIBILITY_SERIES}
+                data={series}
                 margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
               >
                 <CartesianGrid vertical={false} stroke={CHART.grid} />
@@ -125,6 +140,7 @@ export default function AnalyticsPage() {
                 />
               </LineChart>
             </ResponsiveContainer>
+            </BackendState>
           </div>
         </ChartCard>
 

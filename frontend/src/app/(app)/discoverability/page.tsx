@@ -1,14 +1,28 @@
 "use client";
 
+import { useEffect } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section";
 import { ScoreBreakdown } from "@/components/discoverability/score-breakdown";
 import { VisibilityChart } from "@/components/discoverability/visibility-chart";
 import { QueryTable } from "@/components/discoverability/query-table";
-import { QUERY_PRESENCE } from "@/lib/mock/discoverability";
+import { hasMeasurements, useAnalytics } from "@/lib/analytics/store";
 
 export default function DiscoverabilityPage() {
-  const detected = QUERY_PRESENCE.filter((q) => q.reddit === "detected").length;
+  const start = useAnalytics((s) => s.start);
+  const connection = useAnalytics((s) => s.connection);
+  const queries = useAnalytics((s) => s.queries);
+  const series = useAnalytics((s) => s.series);
+  useEffect(() => start(), [start]);
+
+  const detected = queries.filter((q) => q.reddit === "detected").length;
+  const subtitle =
+    connection !== "live"
+      ? "Tracked queries"
+      : hasMeasurements(series)
+        ? `${queries.length} queries · detected on Reddit for ${detected}`
+        : `${queries.length} queries · not measured yet`;
+
   return (
     <div className="mx-auto max-w-[1480px] px-6 pb-8 pt-5">
       <PageHeader
@@ -35,10 +49,7 @@ export default function DiscoverabilityPage() {
 
       <section className="mt-4 rounded-lg border border-border bg-surface">
         <div className="px-5 py-4">
-          <SectionHeader
-            title="Target queries"
-            subtitle={`${QUERY_PRESENCE.length} queries · detected on Reddit for ${detected}`}
-          />
+          <SectionHeader title="Target queries" subtitle={subtitle} />
         </div>
         <div className="scroll-quiet overflow-x-auto border-t border-border pb-1">
           <QueryTable />

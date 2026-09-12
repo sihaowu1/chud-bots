@@ -53,6 +53,9 @@ is the only file that imports the Steel SDK.
 | `orchestrator_agent.py` | GPT-backed campaign task planning, continuation, and durable run audit. It does not post. |
 | `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
 
+The backend also serves `analytics/` (discoverability presence probes and
+`/api/discoverability/*`), included from `main.py`. See `analytics/agents.md`.
+
 ### display/
 
 `index.html` + `styles.css` + `app.js`, no build step. Each agent gets a card

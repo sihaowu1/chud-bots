@@ -12,6 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config, events, orchestrator, steel_client
+from analytics import db as analytics_db
+from analytics import visibility as analytics_visibility
+from analytics.router import router as analytics_router
+
 from .orchestrator_agent import (
     CampaignOrchestrator,
     OrchestratorConfigurationError,
@@ -21,12 +25,17 @@ from .orchestrator_agent import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    analytics_db.connect()
+    analytics_visibility.start()
     yield
+    await analytics_visibility.stop()
     await orchestrator.stop_all()
+    analytics_db.close()
 
 
 app = FastAPI(title="Inception", lifespan=lifespan)
 campaign_orchestrator = CampaignOrchestrator()
+app.include_router(analytics_router)
 
 
 class LaunchRequest(BaseModel):
