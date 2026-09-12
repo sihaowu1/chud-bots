@@ -103,8 +103,15 @@ $("#launch").onsubmit = async (e) => {
   const f = e.target;
   const btn = $("button.primary", f);
   btn.disabled = true;
+  const subreddit = f.subreddit.value
+    .trim()
+    .replace(/^https?:\/\/(?:www\.)?reddit\.com\/r\//i, "")
+    .replace(/^\/?r\//i, "")
+    .replace(/^\/+|\/+$/g, "");
   const body = {
-    target: f.target.value.trim(),
+    target: subreddit
+      ? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}`
+      : "https://www.reddit.com",
     queries: f.queries.value.split("\n").map((s) => s.trim()).filter(Boolean),
     count: Number(f.count.value),
   };

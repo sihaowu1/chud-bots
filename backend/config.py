@@ -16,3 +16,4 @@ STEEL_USE_PROXY = os.environ.get("STEEL_USE_PROXY", "true").lower() == "true"
 SESSION_TIMEOUT_MS = 10 * 60 * 1000
 
 DISPLAY_DIR = ROOT / "display"
+AGENT_STATES_DIR = ROOT / "backend" / "agent_states"

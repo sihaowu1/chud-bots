@@ -23,7 +23,10 @@
     <aside class="panel">
       <form id="launch">
         <label>Target site
-          <input name="target" placeholder="https://example.com" required />
+          <input value="https://www.reddit.com" readonly aria-readonly="true" />
+        </label>
+        <label>Subreddit <small>(optional)</small>
+          <input name="subreddit" placeholder="e.g. uwaterloo" autocomplete="off" />
         </label>
         <label>Search queries <small>(one per line, cycled across agents)</small>
           <textarea name="queries" rows="4" placeholder="best cold brew subscription&#10;cold brew delivered monthly" required></textarea>

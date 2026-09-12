@@ -15,10 +15,13 @@ from urllib.parse import urlparse
 
 from playwright.async_api import Page, async_playwright
 
-from . import events, steel_client
+from . import agent_state_store, events, steel_client
 from .personas import DWELL_DEEP, DWELL_LANDING, DWELL_SERP, Persona, dwell
 
 SEARCH_URL = "https://www.google.com/?hl=en"
+TEMP_MAIL_URL = "https://temp-mail.org/en/"
+
+_EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 @dataclass
@@ -30,6 +33,7 @@ class AgentState:
     level: int = 0
     status: str = "queued"  # queued | running | done | failed | stopped
     session: dict | None = None
+    email: str | None = None
     url: str | None = None
     note: str = ""
     traits: list[str] = field(default_factory=list)
@@ -43,6 +47,7 @@ class AgentState:
             "level": self.level,
             "status": self.status,
             "session": self.session,
+            "email": self.email,
             "url": self.url,
             "note": self.note,
             "traits": self.traits,
@@ -89,6 +94,7 @@ class Dreamer:
                 browser = await pw.chromium.connect_over_cdp(session.websocket_url)
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
+                await self._ensure_email(page)
                 await self._dream(page)
 
             self.state.status = "done"
@@ -107,6 +113,42 @@ class Dreamer:
                 self._emit()
 
     # ---- the dream -------------------------------------------------------
+
+    async def _ensure_email(self, page: Page) -> None:
+        """Load this persona's saved email or obtain one from Temp-Mail."""
+        lock = _EMAIL_LOCKS.setdefault(self.persona.name, asyncio.Lock())
+        async with lock:
+            saved = agent_state_store.load_or_create(self.persona.name)
+            email = saved.get("email")
+            if not isinstance(email, dict):
+                email = {"address": None, "login": None}
+                saved["email"] = email
+
+            address = email.get("address")
+            if address:
+                self.state.email = str(address)
+                self._emit(note=f"using saved email {self.state.email}")
+                return
+
+            self._emit(note="opening Temp-Mail for an email address")
+            await page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded")
+            handle = await page.wait_for_function(
+                """
+                () => {
+                    const preferred = document.querySelector("#mail, input.emailbox-input");
+                    const inputs = preferred ? [preferred] : [...document.querySelectorAll("input")];
+                    return inputs
+                        .map(input => input.value?.trim())
+                        .find(value => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value)) || false;
+                }
+                """,
+                timeout=30_000,
+            )
+            self.state.email = str(await handle.json_value())
+            email["address"] = self.state.email
+            email.setdefault("login", None)
+            agent_state_store.save(self.persona.name, saved)
+            self._emit(note=f"saved email {self.state.email}", url=page.url)
 
     async def _dream(self, page: Page) -> None:
         await self._search(page)

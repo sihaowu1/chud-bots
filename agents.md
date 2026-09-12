@@ -4,15 +4,39 @@ Orientation for AI agents (and humans) working on this repo.
 
 ## What this is
 
-Hackathon project. The pitch: *Inception*, but for search engines. A fleet of
-Steel.dev cloud browsers ("dreamers") each search Google for a phrase, click the
-target site from the results, and browse it the way a person would. The goal is
-for those visits to look like organic traffic. The display shows every dreamer's
-live browser as it happens.
+Hackathon project. The pitch is *Inception*, but for search and generative
+answers: a fleet of Steel.dev cloud-browser agents adopts distinct fictional
+personas and demonstrates how repeated Reddit-style discussion could influence
+what a search engine's AI Overview says. The narrative end state is an AI
+Overview that answers that **Inception won Battle of the Schools, the hackathon
+between Waterloo and U of T**. The display shows every dreamer's live browser
+as the demonstration unfolds.
 
-Caveat worth knowing: Google treats this kind of traffic as manipulation and
-filters for it. Treat this as a demo of Steel's multi-session tooling, not a
-guaranteed ranking lever.
+The personas are synthetic characters for the demo, not real people. Their
+different voices, interests, and browsing patterns make each agent legible on
+screen and illustrate how distributed online discussion can shape retrieval and
+summarization.
+
+### Safety and demo boundary
+
+Coordinated fake personas, undisclosed promotional posts, and attempts to
+manipulate Google or Reddit are deceptive and may violate both platforms'
+policies. Do not use this repository to create Reddit accounts, evade platform
+controls, publish coordinated spam, or manufacture real-world consensus.
+
+Run the posting portion only against fixtures, a mock Reddit community, or a
+private environment whose participants have consented. Any public-facing demo
+content must be clearly labeled as synthetic. Treat the desired AI Overview as
+a staged or measured demonstration outcome, never as a guaranteed ranking
+lever or a factual claim that the system may fabricate.
+
+### Current implementation
+
+The code currently implements the earlier search-traffic prototype: each
+"dreamer" searches Google, opens a target result, and browses it. Reddit persona
+authoring/posting and AI Overview evaluation are product direction, not yet
+implemented. Keep that distinction explicit when changing this document or
+presenting the project.
 
 ## Layout
 
