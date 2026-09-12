@@ -138,8 +138,9 @@ class RedditAuthor:
         self.dreamer._check_stop()
         if self.dry_run:
             await button.wait_for(state="visible", timeout=15_000)
-            if not await button.is_enabled():
-                raise RuntimeError("Reddit submit button is disabled")
+            async with asyncio.timeout(15):
+                while not await button.is_enabled():
+                    await asyncio.sleep(0.2)
             return {"status": "draft", "url": self.page.url, "reddit_username": username}
         receipt = {"status": "uncertain", "payload": payload, "reddit_username": username,
                    "attempted_at": datetime.now(UTC).isoformat()}
