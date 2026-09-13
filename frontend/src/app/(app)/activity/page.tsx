@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { MonitorPlay } from "lucide-react";
 import { useSessions, BACKEND } from "@/lib/sessions/store";
@@ -47,6 +47,7 @@ const CONN: Record<
 };
 
 export default function ActivityPage() {
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const start = useSessions((s) => s.start);
   const connection = useSessions((s) => s.connection);
   const agents = useSessions((s) => s.agents);
@@ -57,7 +58,13 @@ export default function ActivityPage() {
 
   const running = agents.filter((a) => a.status === "running").length;
   const ordered = [...agents].sort((a, b) => rank(a.status) - rank(b.status));
+  const expandedAgent = ordered.find((a) => a.id === expandedAgentId);
+  const visibleAgents = expandedAgent ? [expandedAgent] : ordered;
   const c = CONN[connection];
+
+  const toggleExpanded = (id: string) => {
+    setExpandedAgentId((current) => (current === id ? null : id));
+  };
 
   return (
     <div className="flex h-full min-h-0">
@@ -112,10 +119,21 @@ export default function ActivityPage() {
               />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+            <div
+              className={cn(
+                "grid grid-cols-1 gap-4",
+                !expandedAgent && "xl:grid-cols-2 2xl:grid-cols-3",
+              )}
+            >
               <AnimatePresence initial={false}>
-                {ordered.map((a) => (
-                  <SessionCard key={a.id} agent={a} onStop={stop} />
+                {visibleAgents.map((a) => (
+                  <SessionCard
+                    key={a.id}
+                    agent={a}
+                    expanded={a.id === expandedAgent?.id}
+                    onToggleExpanded={toggleExpanded}
+                    onStop={stop}
+                  />
                 ))}
               </AnimatePresence>
             </div>
@@ -123,21 +141,23 @@ export default function ActivityPage() {
         </div>
       </div>
 
-      <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface">
-        <div className="border-b border-border px-5 py-4">
-          <SectionHeader
-            title="Launch agents"
-            subtitle="Each agent gets its own cloud browser"
-          />
-        </div>
-        <div className="px-5 py-4">
-          <LaunchPanel />
-        </div>
-        <div className="border-y border-border px-5 py-3">
-          <SectionHeader title="Session log" />
-        </div>
-        <SessionLog className="min-h-0 flex-1 py-1" />
-      </aside>
+      {!expandedAgent && (
+        <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface">
+          <div className="border-b border-border px-5 py-4">
+            <SectionHeader
+              title="Launch agents"
+              subtitle="Each agent gets its own cloud browser"
+            />
+          </div>
+          <div className="px-5 py-4">
+            <LaunchPanel />
+          </div>
+          <div className="border-y border-border px-5 py-3">
+            <SectionHeader title="Session log" />
+          </div>
+          <SessionLog className="min-h-0 flex-1 py-1" />
+        </aside>
+      )}
     </div>
   );
 }
