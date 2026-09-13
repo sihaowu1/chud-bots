@@ -1,6 +1,6 @@
 <div align="center">
 
-# Inception
+<img src="assets/logo.png" width="480" alt="Inception">
 
 *Plant the idea. Let search dream it up.*
 
@@ -151,7 +151,7 @@ See [`agents.md`](agents.md) for the full API reference, dream-level state machi
 
 ## Team
 
-Joshua Zhang, Sean Inoue, Sihao Wu, sylvia898
+Joshua Zhang, Sean Inoue, Sihao Wu, Sylvia Wang
 
 ## License
 
