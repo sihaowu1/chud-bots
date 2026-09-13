@@ -124,6 +124,7 @@ class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
             "https://www.reddit.com", ["launch topic"], 2,
             mode="profile_post", selected_personas=None,
             subreddits=None, profile_posts=posts,
+            search_prompts=None,
         )
         self.assertEqual(len(result["agents"]), 2)
 

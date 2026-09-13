@@ -34,6 +34,7 @@ REDDIT_HOME_URL = "https://www.reddit.com/"
 CAPTCHA_SOLVE_TIMEOUT_SECONDS = 10_000_000
 CAPTCHA_POLL_INTERVAL_SECONDS = 1
 LOGIN_ONLY_DWELL_SECONDS = 5 * 60
+YUSUF_COMPLETION_HOLD_SECONDS = 5 * 60
 REDDIT_LOGIN_TIMEOUT_SECONDS = 60
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
@@ -134,6 +135,8 @@ class Dreamer:
                 if self.mode != "reddit_browse":
                     await self._prepare_reddit_access(page)
                 await self._dream(page)
+                if self.persona.name == "Yusuf":
+                    await self._hold_yusuf_session(page)
 
             self.state.status = "done"
             self._emit(note="kicked back to reality")
@@ -151,6 +154,17 @@ class Dreamer:
                 self._emit()
 
     # ---- the dream -------------------------------------------------------
+
+    async def _hold_yusuf_session(self, page: Page) -> None:
+        """Keep Yusuf's completed browser visible until timeout or operator kick."""
+        self._emit(
+            note="task complete; keeping Yusuf's browser open for 5 minutes",
+            url=page.url,
+        )
+        for _ in range(YUSUF_COMPLETION_HOLD_SECONDS):
+            self._check_stop()
+            await asyncio.sleep(1)
+        self._check_stop()
 
     async def _prepare_reddit_access(self, page: Page) -> None:
         """Log in with complete saved credentials, otherwise run signup."""

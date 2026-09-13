@@ -30,7 +30,8 @@ def resolve_personas(count: int, selected_personas: list[str] | None = None) -> 
 def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
            selected_personas: list[str] | None = None,
            subreddits: tuple[str, ...] | None = None,
-           profile_posts: dict[str, dict] | None = None) -> list[dict]:
+           profile_posts: dict[str, dict] | None = None,
+           search_prompts: dict[str, str] | None = None) -> list[dict]:
     if mode not in ("legacy", "reddit_browse", "profile_post"):
         raise ValueError("unknown browsing mode")
     chosen = resolve_personas(count, selected_personas)
@@ -48,6 +49,16 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
     count = max(0, min(count, room))
     if count == 0:
         raise RuntimeError(f"at MAX_AGENTS={config.MAX_AGENTS}; stop some first")
+    if search_prompts is not None:
+        expected_searchers = {
+            persona.name for persona in chosen[:count]
+            if persona.browsing_mode != "reddit_browse"
+        }
+        if set(search_prompts) != expected_searchers or any(
+            not isinstance(query, str) or not query.strip()
+            for query in search_prompts.values()
+        ):
+            raise ValueError("search prompts must cover every launched Google persona")
 
     launched = []
     normalized_queries = [query.strip() for query in queries if query.strip()]
@@ -55,8 +66,11 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
     # the normal persona-cycling launch path still applies.
     query_cycle = itertools.cycle(normalized_queries or [""])
     for persona in chosen[:count]:
+        query = next(query_cycle)
+        if persona.browsing_mode != "reddit_browse" and search_prompts is not None:
+            query = search_prompts[persona.name].strip()
         d = Dreamer(
-            persona, next(query_cycle), target, mode=mode,
+            persona, query, target, mode=mode,
             profile_post=profile_posts.get(persona.name) if profile_posts else None,
         )
         if d.mode == "reddit_browse":

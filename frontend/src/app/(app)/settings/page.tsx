@@ -224,7 +224,7 @@ export default function SettingsPage() {
           <Row label="Command palette">
             <Kbd>⌘K</Kbd>
           </Row>
-          <Row label="Go to Dashboard / Activity / Logs / Opportunities">
+          <Row label="Go to Dashboard / Logs / Opportunities">
             <span className="flex items-center gap-1">
               <Kbd>G</Kbd>
               <span className="text-xs text-fg-subtle">then</span>

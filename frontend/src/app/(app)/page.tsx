@@ -1,69 +1,163 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { useSim } from "@/lib/store";
-import { useNow } from "@/hooks/use-now";
-import { clock } from "@/lib/format";
+import { useEffect, useState } from "react";
+import { AnimatePresence } from "framer-motion";
+import { MonitorPlay } from "lucide-react";
+import { useSessions, BACKEND } from "@/lib/sessions/store";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section";
-import { CampaignSummary } from "@/components/dashboard/campaign-summary";
-import { AgentsDeployed } from "@/components/dashboard/agents-deployed";
-import { AgentPlan } from "@/components/dashboard/agent-plan";
-import { ActivityFeed } from "@/components/logs/activity-feed";
+import { EmptyState } from "@/components/shared/empty-state";
+import {
+  StatusDot,
+  TONE_TEXT,
+  type Tone,
+} from "@/components/shared/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { SessionCard } from "@/components/activity/session-card";
+import { LaunchPanel } from "@/components/activity/launch-panel";
+import { SessionLog } from "@/components/activity/session-log";
+import { AnimatedNumber } from "@/components/shared/animated-number";
+import { cn } from "@/lib/utils";
+
+const CONN: Record<
+  string,
+  { label: string; tone: Tone; pulse?: boolean; hint: string }
+> = {
+  connecting: {
+    label: "Connecting",
+    tone: "warning",
+    pulse: true,
+    hint: `Looking for the backend at ${BACKEND}`,
+  },
+  live: {
+    label: "Live",
+    tone: "success",
+    pulse: true,
+    hint: "Streaming from the Inception backend. Viewers are Steel's live debug sessions.",
+  },
+  offline: {
+    label: "Offline",
+    tone: "danger",
+    hint: "Backend not reachable. Start `uvicorn backend.main:app` to go live.",
+  },
+};
 
 export default function DashboardPage() {
-  const campaign = useSim((s) => s.campaign);
-  const hydrated = useSim((s) => s.hydrated);
-  const now = useNow(1000);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const start = useSessions((s) => s.start);
+  const connection = useSessions((s) => s.connection);
+  const agents = useSessions((s) => s.agents);
+  const max = useSessions((s) => s.max);
+  const stop = useSessions((s) => s.stop);
+
+  useEffect(() => start(), [start]);
+
+  const running = agents.filter((a) => a.status === "running").length;
+  const ordered = [...agents].sort((a, b) => rank(a.status) - rank(b.status));
+  const expandedAgent = ordered.find((a) => a.id === expandedAgentId);
+  const visibleAgents = expandedAgent ? [expandedAgent] : ordered;
+  const c = CONN[connection];
+
+  const toggleExpanded = (id: string) => {
+    setExpandedAgentId((current) => (current === id ? null : id));
+  };
 
   return (
-    <div className="mx-auto max-w-[1480px] px-6 pb-8 pt-5">
-      <PageHeader
-        title="Dashboard"
-        description={
-          <>
-            {campaign.name} ·{" "}
-            {campaign.status === "running" ? "Running" : "Paused"}
-          </>
-        }
-        actions={
-          <span className="font-mono text-xs text-fg-subtle tnum">
-            {hydrated ? clock(now) : "--:--:--"}
-          </span>
-        }
-      />
-
-      <div className="mt-5 grid grid-cols-12 gap-4">
-        <CampaignSummary className="col-span-12 xl:col-span-7" />
-        <AgentsDeployed className="col-span-12 xl:col-span-5" />
-      </div>
-
-      <div className="mt-4 grid grid-cols-12 gap-4">
-        <section className="col-span-12 flex h-[560px] flex-col rounded-lg border border-border bg-surface xl:col-span-8">
-          <div className="flex items-start justify-between border-b border-border px-5 py-4">
-            <SectionHeader
-              size="lg"
-              title="Live Agent Activity"
-              subtitle="What every agent is doing right now"
-            />
-            <Link
-              href="/logs"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Full view
-              <ArrowRight className="size-3" />
-            </Link>
-          </div>
-          <ActivityFeed
-            mode="inline"
-            limit={80}
-            showFilters={false}
-            className="min-h-0 flex-1"
+    <div className="flex h-full min-h-0">
+      <div className="scroll-quiet flex min-w-0 flex-1 flex-col overflow-y-auto [&>*]:shrink-0">
+        <div className="px-6 pt-5">
+          <PageHeader
+            title="Dashboard"
+            description="Watch each agent sign in and work — live browser sessions from the Inception backend"
+            actions={
+              <>
+                <span className="text-xs text-muted-foreground">
+                  <AnimatedNumber
+                    value={running}
+                    className="font-mono text-foreground"
+                  />{" "}
+                  / {max || "–"} sessions live
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 text-xs",
+                        TONE_TEXT[c.tone],
+                      )}
+                    >
+                      <StatusDot tone={c.tone} pulse={c.pulse} size="xs" />
+                      {c.label}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-64">{c.hint}</TooltipContent>
+                </Tooltip>
+              </>
+            }
           />
-        </section>
-        <AgentPlan className="col-span-12 h-[560px] xl:col-span-4" />
+        </div>
+
+        <div className="px-6 pb-8 pt-5">
+          {ordered.length === 0 ? (
+            <div className="rounded-lg border border-border bg-surface">
+              <EmptyState
+                icon={MonitorPlay}
+                title={connection === "offline" ? "Backend offline" : "No sessions yet"}
+                description={
+                  connection === "offline"
+                    ? "Start the backend to see live sessions here."
+                    : "Launch agents from the panel on the right. Each one gets a cloud browser you can watch here."
+                }
+              />
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "grid grid-cols-1 gap-4",
+                !expandedAgent && "xl:grid-cols-2 2xl:grid-cols-3",
+              )}
+            >
+              <AnimatePresence initial={false}>
+                {visibleAgents.map((a) => (
+                  <SessionCard
+                    key={a.id}
+                    agent={a}
+                    expanded={a.id === expandedAgent?.id}
+                    onToggleExpanded={toggleExpanded}
+                    onStop={stop}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
       </div>
+
+      {!expandedAgent && (
+        <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface">
+          <div className="border-b border-border px-5 py-4">
+            <SectionHeader
+              title="Launch agents"
+              subtitle="Each agent gets its own cloud browser"
+            />
+          </div>
+          <div className="px-5 py-4">
+            <LaunchPanel />
+          </div>
+          <div className="border-y border-border px-5 py-3">
+            <SectionHeader title="Session log" />
+          </div>
+          <SessionLog className="min-h-0 flex-1 py-1" />
+        </aside>
+      )}
     </div>
   );
+}
+
+function rank(s: string) {
+  return s === "running" ? 0 : s === "queued" ? 1 : 2;
 }

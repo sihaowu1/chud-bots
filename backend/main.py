@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from . import config, events, orchestrator, personas, steel_client
 from .subreddit_selector import select_subreddits
+from .search_prompt_selector import select_search_prompts
 from .orchestrator_agent import (
     CampaignOrchestrator,
     OrchestratorConfigurationError,
@@ -76,6 +77,7 @@ async def launch(req: LaunchRequest):
         )
         prompt = req.prompt.strip() or "\n".join(req.queries).strip()
         profile_posts = None
+        search_prompts = None
         if req.mode == "profile_post":
             if not prompt:
                 raise ValueError("profile_post mode requires a non-empty query")
@@ -111,12 +113,19 @@ async def launch(req: LaunchRequest):
                 subreddits = await select_subreddits(
                     prompt, browser_count=bound_browser_count,
                 )
+            google_personas = [
+                persona.name for persona in chosen[:launch_count]
+                if persona.browsing_mode != "reddit_browse"
+            ]
+            if prompt and google_personas:
+                search_prompts = await select_search_prompts(prompt, google_personas)
         if req.prompt.strip():
             queries = [prompt]
         return {"agents": orchestrator.launch(
             req.target, queries, req.count,
             mode=req.mode, selected_personas=req.personas,
             subreddits=subreddits, profile_posts=profile_posts,
+            search_prompts=search_prompts,
         )}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

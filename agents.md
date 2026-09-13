@@ -27,12 +27,19 @@ Yusuf scrolls that subreddit and dwells for two seconds before publishing. Eames
 Mal, and Generic 5–8 retain the legacy flow. A launch-wide `mode` cannot override
 these bindings except for Yusuf's automatic topic-post assignment. Pool order remains
 seven named personas followed by eight generic personas.
+After Yusuf completes his assigned browsing or posting task, his Steel session stays
+open for five minutes so the final browser state remains visible; an operator kick
+still ends the hold immediately.
 The API counts the bound personas that can launch, then selects three subreddits
 once when a topic is supplied and at least one selected persona is bound. It
 shares that route only with bound browsers. Direct Dreamer
 runs select from their query before opening Steel. With no topic, bound personas
 use the default hackathon/technology tour. Standalone login/author adapter helpers
 remain explicit operations outside the Dreamer browsing lifecycle.
+For selected legacy personas that use Google, a topic launch also calls
+`gpt-5.4-mini` once before opening Steel and assigns each persona a distinct,
+topic-relevant search query. The assignment is keyed by persona so mixed launches
+keep their predetermined queries. A failed or invalid assignment rejects the launch.
 
 The Activity page launches a Reddit tour using `backend/reddit_patrol.py`, without
 the campaign coordinator or signup/login flow. When Yusuf is selected for a topic
@@ -126,7 +133,7 @@ npm run build && npm run lint                   # both must be clean
 
 | path | role |
 |------|------|
-| `src/app/(app)/*` | routes: dashboard `/`, campaign, **activity** (live browser sessions), **logs** (agent event feed), opportunities, agents (list + network), discoverability, analytics, settings |
+| `src/app/(app)/*` | routes: **dashboard** `/` (live browser sessions), campaign, **logs** (agent event feed), opportunities, discoverability, analytics, settings |
 | `src/app/globals.css` | design tokens. Single dark theme, neutral surfaces, one accent (`--signal`), semantic success/warning/danger. Keyframes for row entry/flash. |
 | `src/lib/types.ts` | domain model: Campaign, Agent, ActivityEvent, PlannedTask, Opportunity… |
 | `src/lib/mock/*` | seed data. `agents.ts` holds the deploy order + `allocationFor(n)`; `content.ts` the thread/query pools the simulator draws from. |
@@ -135,7 +142,7 @@ npm run build && npm run lint                   # both must be clean
 | `src/lib/sim/use-simulation.ts` | mounts the 2–5 s tick loop once, in `AppShell`. |
 | `src/components/shell/*` | sidebar, top bar (campaign switcher, live state, pause-all with confirm), notifications, ⌘K palette. |
 | `src/components/logs/*` | the event feed (Logs page + dashboard). `activity-feed.tsx` holds back new rows while the user is scrolled or inspecting and shows "N new events ↓" instead. |
-| `src/lib/sessions/*` + `src/components/activity/*` | the Activity page: a wall of the dreamers' cloud-browser sessions from the `agent-login` backend. `store.ts` polls `/backend/api/agents` (+ SSE `/backend/api/events`) and embeds each Steel `debug_url` in an iframe; if the backend is unreachable it runs `mock.ts`, which replays the same Temp-Mail → Reddit signup/login → CAPTCHA → Google → land → deepen script with a sketched viewer. `next.config.ts` rewrites `/backend/*` to `BACKEND_URL` (default `http://127.0.0.1:8000`) because the FastAPI app has no CORS. |
+| `src/lib/sessions/*` + `src/components/activity/*` | the Dashboard: a wall of the dreamers' cloud-browser sessions from the `agent-login` backend. `store.ts` polls `/backend/api/agents` (+ SSE `/backend/api/events`) and embeds each Steel `debug_url` in an iframe; if the backend is unreachable it runs `mock.ts`, which replays the same Temp-Mail → Reddit signup/login → CAPTCHA → Google → land → deepen script with a sketched viewer. `next.config.ts` rewrites `/backend/*` to `BACKEND_URL` (default `http://127.0.0.1:8000`) because the FastAPI app has no CORS. |
 | `src/components/shared/*` | primitives: status dots, animated numbers, score, inspector panel, toast with undo, section/panel/field. |
 
 Conventions that matter here:

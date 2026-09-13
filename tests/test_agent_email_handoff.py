@@ -461,6 +461,23 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(field.presses, [])
         self.assertEqual(field.fill_calls, [agent.state.email])
 
+    async def test_yusuf_completion_hold_keeps_session_alive_for_configured_duration(self):
+        persona = Persona(
+            name="Yusuf", traits=[], typing_delay_ms=(1, 1),
+            scroll_passes=(1, 1), max_depth=1, mobile=False,
+            browsing_mode="reddit_browse",
+        )
+        agent = Dreamer(persona, "topic", "")
+        page = SimpleNamespace(url="https://www.reddit.com/r/technology/")
+
+        with patch("backend.agent.YUSUF_COMPLETION_HOLD_SECONDS", 2), patch(
+            "backend.agent.asyncio.sleep", new=AsyncMock(),
+        ) as sleep:
+            await agent._hold_yusuf_session(page)
+
+        self.assertEqual(sleep.await_count, 2)
+        self.assertIn("keeping Yusuf's browser open", agent.state.note)
+
 
 if __name__ == "__main__":
     unittest.main()
