@@ -1,4 +1,4 @@
-# Chud Bots
+# Inception
 
 ## Quick start: run one agent
 
