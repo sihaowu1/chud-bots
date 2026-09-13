@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import agent_state_store, config, events, orchestrator_log, personas
+from . import agent_state_store, config, events, orchestrator_log, personas, post_library
 
 ALLOWED_ACTIONS = {"create_post", "create_profile_post", "comment", "wait"}
 ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
@@ -54,8 +54,10 @@ Read and obey the supplied orchestrator instructions. Assign the smallest useful
 each selected persona. The only actions are create_post, create_profile_post, comment, and wait.
 In the first phase, give EVERY selected persona a productive assignment: create_post,
 create_profile_post, or comment. Do not leave selected personas unassigned or give them
-placeholder waits. Use comments only when a valid target already exists; otherwise assign
-distinct posts relevant to the prompt. Later phases may wait once the requested work is
+placeholder waits. For multiple agents, default to one new profile post and comments by
+the other agents on relevant entries in post_library. Use the library URLs verbatim; never
+invent URLs. If there is no relevant library target, assign posts instead. Honor explicit
+post-only or comment-only requests. Later phases may wait once the requested work is
 complete or a task is blocked. Do not add unnecessary work after completion.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
@@ -64,25 +66,27 @@ Each new run is a new user request. When the current prompt asks for a post (inc
 promotion), assign a new create_post or create_profile_post in the first phase. Past runs
 never satisfy the current request, even if their topic or prompt is identical. Assess
 completion and submission blockers only against the current run's tasks and activity.
-Use existing_posts or existing_comments when a useful completed post or comment from this
-run is available for a reply. For those comments, set target_url to the existing URL
+post_library contains confirmed posts from the dashboard library, including earlier runs.
+Use these only as comment targets, never as evidence the current request is complete.
+For comments, set target_url to the selected library post URL
 and leave wait_for empty unless the comment also depends on a current-run task.
-All comments must target posts or comments created by another selected persona. Do not comment
-on outside users' posts, outside comments, or the same persona's own content.
+All comments must target a library post owned by a different persona. Its owner need not
+be selected in this run. Do not comment on the same persona's own content.
 Do not duplicate a task already completed or in progress within this run. Keep persona voices
 distinct. Supply final title and body for create_post and create_profile_post, body for
 comment, and null title/body for wait. Instructions summarize the command. Comments may
 reply to posts or to existing comments. Use an observed post or comment URL as target_url,
-or null with exactly one create_post task ID in wait_for whose completed URL the executor
-will use. Only r/HackathonsCanada is supported in private runs for create_post and
-comments. create_profile_post publishes under the persona's own profile and uses null
+or null with exactly one create_post or create_profile_post task ID in wait_for whose
+completed URL the executor will use. Comment targets may be any Reddit community or
+profile in the library; do not restrict them to a hardcoded subreddit.
+New posts should use create_profile_post under the persona's own profile with null
 target_url. Mock runs use https://mock.local/posts/<task-id> URLs,
 https://mock.local/comments/<task-id> URLs, or https://mock.local/profile-posts/<task-id>
 URLs. Dependencies must reference tasks from previous phases. Never issue shell commands.
 
 When the user prompt starts with "promote ", treat the remaining text as the cause or idea
-to promote. Prefer create_profile_post assignments for the selected personas so each post is
-published under that persona's own profile.
+to promote. Use one new profile post and relevant library comments for the remaining agents
+when suitable library posts exist.
 
 Never plan platform-control evasion or spam. If the request conflicts with that boundary,
 assign a wait task explaining the blocker.
@@ -367,6 +371,9 @@ class CampaignOrchestrator:
             }
             for ledger in ledgers
         ]
+        library = post_library.list_posts()
+        if run["environment"] == "private":
+            library = [post for post in library if urlsplit(post["url"]).netloc == "www.reddit.com"]
         return {
             "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
@@ -374,7 +381,8 @@ class CampaignOrchestrator:
             "environment": run["environment"],
             "run_id": run["id"],
             "previous_phases": run["phases"],
-            "existing_posts": _existing_posts(ledgers),
+            "post_library": library,
+            "existing_posts": library,
             "existing_comments": _existing_comments(ledgers),
             "agents": ledgers,
         }
@@ -386,9 +394,10 @@ class CampaignOrchestrator:
         if not isinstance(raw_assignments, list) or not raw_assignments:
             raise OrchestratorModelError("plan must contain at least one assignment")
         assignments = []
-        known_targets = _comment_targets(
-            [agent_state_store.public_ledger(name) for name in run["personas"]]
-        )
+        known_targets = {
+            post["url"]: post["persona"] for post in post_library.list_posts()
+            if run["environment"] != "private" or urlsplit(post["url"]).netloc == "www.reddit.com"
+        }
         known_ids = {task["id"]: task for phase in run["phases"] for task in phase["assignments"]}
         for item in raw_assignments:
             if not isinstance(item, dict) or item.get("persona") not in run["personas"]:
@@ -415,16 +424,16 @@ class CampaignOrchestrator:
                         )
                     if owner == item["persona"]:
                         raise OrchestratorModelError(
-                            "comments must target another selected persona's post or comment"
+                            "comments must target another persona's library post"
                         )
                 else:
                     post_dependencies = [
                         known_ids[task_id] for task_id in wait_for
-                        if known_ids[task_id]["action"] == "create_post"
+                        if known_ids[task_id]["action"] in {"create_post", "create_profile_post"}
                     ]
                     if len(post_dependencies) != 1:
                         raise OrchestratorModelError(
-                            "comment without target_url needs exactly one create_post dependency"
+                            "comment without target_url needs exactly one post dependency"
                         )
                     if post_dependencies[0]["persona"] == item["persona"]:
                         raise OrchestratorModelError(

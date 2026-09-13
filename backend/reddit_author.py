@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from playwright.async_api import Page
 
-from . import agent_state_store, config
+from . import agent_state_store, config, post_library
 from .agent import Dreamer
 
 COMMUNITY = "HackathonsCanada"
@@ -33,12 +33,18 @@ def comment_target_url(value: str) -> str:
     parsed = urlsplit(value)
     if (parsed.scheme != "https" or parsed.netloc != "www.reddit.com"
             or not re.fullmatch(
-                r"/r/HackathonsCanada/comments/[a-z0-9]+/[^/]+(?:/[a-z0-9]+)?/?",
+                r"/(?:r|user)/[a-z0-9_-]+/comments/[a-z0-9]+/[^/]+(?:/[a-z0-9]+)?/?",
                 parsed.path,
                 re.I,
             )):
-        raise ValueError("Use a www.reddit.com post or comment permalink in r/HackathonsCanada")
+        raise ValueError("Use a www.reddit.com community or profile post permalink from the library")
     return ORIGIN + parsed.path.rstrip("/") + "/"
+
+
+def _comment_community(value: str) -> str:
+    parts = urlsplit(value).path.strip("/").split("/")
+    community = f"u_{parts[1]}" if parts[0].lower() == "user" else parts[1]
+    return COMMUNITY if community.casefold() == COMMUNITY.casefold() else community
 
 
 def _comment_parent_id(value: str) -> str:
@@ -184,7 +190,7 @@ class RedditAuthor:
         return (data.get("author") == username
                 and data.get("body", "").strip() == payload["body"]
                 and data.get("parent_id") == _comment_parent_id(payload["post_url"])
-                and data.get("subreddit", "").casefold() == COMMUNITY.casefold())
+                and data.get("subreddit", "").casefold() == payload.get("subreddit", COMMUNITY).casefold())
 
     @staticmethod
     def _comment_result(data: dict, username: str) -> dict:
@@ -341,17 +347,26 @@ class RedditAuthor:
     async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
         url = comment_target_url(post_url)
         body = validated_body(body, 10_000)
-        payload = dict(action="comment", subreddit=COMMUNITY, post_url=url,
+        community = _comment_community(url)
+        payload = dict(action="comment", subreddit=community, post_url=url,
                        body=body, request_id=request_id)
         path, cached = self._receipt(request_id, payload)
         if cached:
             return cached
+        parent_path = "/".join(urlsplit(url).path.strip("/").split("/")[:5])
+        library_post = next((post for post in post_library.list_posts()
+                             if urlsplit(post["url"]).netloc == "www.reddit.com"
+                             and urlsplit(post["url"]).path.strip("/") == parent_path), None)
+        if library_post is None:
+            raise ValueError("Comment target is not a confirmed post in the library")
         username = await self._identity()
+        if (library_post.get("reddit_username") or "").casefold() == username.casefold():
+            raise ValueError("Choose another persona's library post for a comment")
         await self._open(url)
         before = await self._json(url + ".json?limit=500&sort=new")
         post = before[0]["data"]["children"][0]["data"]
-        if post.get("subreddit", "").casefold() != COMMUNITY.casefold() or post.get("locked") or post.get("archived"):
-            raise RuntimeError("Post is outside the test subreddit, locked, or archived")
+        if post.get("subreddit", "").casefold() != community.casefold() or post.get("locked") or post.get("archived"):
+            raise RuntimeError("Library post community does not match, or the post is locked or archived")
         parent_id = _comment_parent_id(url)
         if parent_id.startswith("t1_") and parent_id not in {
             item.get("name") for item in self._comments(before[1])

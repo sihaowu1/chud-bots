@@ -323,6 +323,14 @@ campaign still reports the failed persona. The standalone CLI retains serial exe
 and its per-command session lifecycle.
 
 New campaigns use only their own assignments and activity as planning history.
+Comment targets come from the same confirmed post library shown on the dashboard,
+including posts from earlier runs and personas outside the current selection.
+Library posts are reference targets, not evidence that a new request is complete.
+The planner defaults to one new profile post and relevant library comments for
+the other selected agents. Comment publishing supports the library's Reddit
+profile and community URLs; r/HackathonsCanada is no longer a comment restriction.
+The adapter verifies library membership and the actual target community, and
+comment receipts retain that community for verification and recovery.
 An explicit request to post or promote requires a new post assignment; a prior
 campaign on the same topic does not fulfill it. Saved persona identities and
 durable receipts persist, and resuming a task retains its submission protections.

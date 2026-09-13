@@ -199,7 +199,7 @@ class CampaignExecutor:
         else:
             target = task.get("target_url")
             if not target:
-                posts = [t for t in tasks if t["id"] in task["wait_for"] and t["action"] == "create_post"]
+                posts = [t for t in tasks if t["id"] in task["wait_for"] and t["action"] in {"create_post", "create_profile_post"}]
                 if len(posts) != 1:
                     raise ValueError("Comment needs a post URL or exactly one post dependency")
                 target = activity[posts[0]["id"]].get("url")
