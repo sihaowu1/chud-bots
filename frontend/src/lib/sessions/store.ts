@@ -63,7 +63,7 @@ function diffToLogs(
   return out;
 }
 
-export const useSessions = create<SessionState>((set, get) => ({
+export const useSessions = create<SessionState>((set) => ({
   connection: "connecting",
   agents: [],
   max: 0,
@@ -155,7 +155,7 @@ export const useSessions = create<SessionState>((set, get) => ({
     const r = await fetch(`${BACKEND}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, mode: "profile_post" }),
     });
     if (!r.ok)
       throw new Error(

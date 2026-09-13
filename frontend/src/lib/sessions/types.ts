@@ -15,6 +15,7 @@ export interface SteelSession {
 }
 
 export interface BrowserAgent {
+  mode?: "legacy" | "reddit_browse" | "profile_post";
   id: string;
   persona: string;
   query: string; // "" = login only
@@ -74,6 +75,8 @@ export function stageOf(a: BrowserAgent): Stage {
   if (a.status === "done" || a.status === "failed" || a.status === "stopped")
     return "done";
   const url = a.url ?? "";
+  if (a.mode === "profile_post" && a.level > 0) return "browse";
+  if (a.mode === "reddit_browse") return a.level === 0 ? "wake" : "browse";
   const note = a.note.toLowerCase();
   if (a.level >= 3 || note.includes("dwelling")) return "browse";
   if (a.level === 2) return "land";

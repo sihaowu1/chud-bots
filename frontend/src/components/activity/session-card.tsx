@@ -147,7 +147,13 @@ function SessionCardInner({ agent: a, onStop }: Props) {
             className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
             title={a.url ?? undefined}
           >
-            {a.query ? `“${a.query}”` : "login only"}
+            {a.mode === "profile_post"
+              ? `Profile post · “${a.query}”`
+              : a.mode === "reddit_browse"
+                ? "Read-only subreddit tour"
+                : a.query
+                  ? `“${a.query}”`
+                  : "login only"}
             {a.url && (
               <>
                 <span className="mx-1.5 text-fg-subtle">·</span>

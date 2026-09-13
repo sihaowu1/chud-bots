@@ -52,6 +52,7 @@ class AgentState:
     url: str | None = None
     note: str = ""
     traits: list[str] = field(default_factory=list)
+    mode: str = "legacy"
 
     def snapshot(self) -> dict:
         return {
@@ -66,11 +67,19 @@ class AgentState:
             "url": self.url,
             "note": self.note,
             "traits": self.traits,
+            "mode": self.mode,
         }
 
 
 class Dreamer:
-    def __init__(self, persona: Persona, query: str, target: str):
+    def __init__(self, persona: Persona, query: str, target: str, *,
+                 mode: str = "legacy", profile_post: dict | None = None):
+        if mode not in ("legacy", "reddit_browse", "profile_post"):
+            raise ValueError("unknown dreamer mode")
+        if (mode == "profile_post") != (profile_post is not None):
+            raise ValueError("profile_post content is required only in profile_post mode")
+        self.mode = mode
+        self.profile_post = profile_post
         self.persona = persona
         self.state = AgentState(
             id=uuid.uuid4().hex[:8],
@@ -78,6 +87,7 @@ class Dreamer:
             query=query,
             target=target,
             traits=persona.traits,
+            mode=mode,
         )
         self._stop = asyncio.Event()
         self.task: asyncio.Task | None = None
@@ -112,7 +122,8 @@ class Dreamer:
                 browser = await pw.chromium.connect_over_cdp(session.websocket_url)
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
-                await self._prepare_reddit_access(page)
+                if self.mode != "reddit_browse":
+                    await self._prepare_reddit_access(page)
                 await self._dream(page)
 
             self.state.status = "done"
@@ -457,6 +468,22 @@ class Dreamer:
         )
 
     async def _dream(self, page: Page) -> None:
+        if self.mode == "reddit_browse":
+            from .reddit_patrol import browse_reddit
+
+            await browse_reddit(self, page)
+            return
+        if self.mode == "profile_post":
+            from .reddit_author import RedditAuthor
+
+            post = self.profile_post
+            assert post is not None
+            self._emit(1, f'preparing profile post for "{self.state.query}"', page.url)
+            result = await RedditAuthor(self, page).create_profile_post(
+                post["title"], post["body"], request_id=post["request_id"],
+            )
+            self._emit(3, "profile post confirmed", result["url"])
+            return
         if not self.state.query.strip():
             if not self._reddit_authenticated:
                 await self._wait_for_reddit_home(page)

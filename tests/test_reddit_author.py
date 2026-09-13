@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend.reddit_author import RedditAuthor, thread_url, validated_body
+from backend.reddit_author import (
+    RedditAuthor,
+    profile_post_url,
+    thread_url,
+    validated_body,
+)
 
 
 class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
@@ -32,6 +37,21 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         for body, limit in ((" ", 1000), ("x" * 101, 100)):
             with self.assertRaises(ValueError):
                 validated_body(body, limit)
+
+    def test_profile_post_url_only_accepts_the_expected_profile(self):
+        self.assertEqual(
+            profile_post_url(
+                "https://www.reddit.com/user/test-user/comments/abc/title/", "test-user"
+            ),
+            "https://www.reddit.com/user/test-user/comments/abc/title/",
+        )
+        for url in (
+            "https://evil.example/user/test-user/comments/abc/title/",
+            "https://www.reddit.com/user/other/comments/abc/title/",
+            "https://www.reddit.com/r/other/comments/abc/title/",
+        ):
+            with self.assertRaises(ValueError):
+                profile_post_url(url, "test-user")
 
     async def test_invalid_title_never_touches_browser(self):
         for title in ("", "x" * 301, "two\nlines"):
@@ -93,6 +113,35 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["removed_by_category"], "reddit")
         control.click.assert_awaited_once()
         self.assertEqual(self.author._submitted.await_count, 2)
+
+    async def test_profile_post_uses_authenticated_profile_and_verifies_content(self):
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._open = AsyncMock()
+        data = {
+            "name": "t3_new",
+            "author": "test-user",
+            "title": "A profile thought",
+            "selftext": "Body",
+            "subreddit": "u_test-user",
+            "permalink": "/user/test-user/comments/new/a_profile_thought/",
+            "removed_by_category": None,
+        }
+        self.author._submitted = AsyncMock(side_effect=[[], [data]])
+        control = Mock(fill=AsyncMock(), click=AsyncMock())
+        self.page.get_by_role.return_value = control
+        with patch("backend.reddit_author.agent_state_store.append_activity"):
+            result = await self.author.create_profile_post(
+                "A profile thought", "Body", request_id="profile-post",
+            )
+
+        self.author._open.assert_awaited_once_with(
+            "https://www.reddit.com/user/test-user/submit/?type=TEXT"
+        )
+        self.assertEqual(
+            result["url"],
+            "https://www.reddit.com/user/test-user/comments/new/a_profile_thought/",
+        )
+        control.click.assert_awaited_once()
 
     async def test_comment_verifies_new_top_level_reply(self):
         self.author._identity = AsyncMock(return_value="test-user")
