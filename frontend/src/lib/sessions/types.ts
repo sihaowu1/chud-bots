@@ -1,6 +1,26 @@
 // Mirrors `AgentState.snapshot()` and `steel_client.session_summary()` on the
 // backend (agent-login branch). Field names are the backend's, verbatim.
 
+export interface CampaignPlan {
+  id: string;
+  prompt: string;
+  status: string;
+  phases: {
+    number: number;
+    summary: string;
+    assignments: {
+      id: string;
+      persona: string;
+      action: "create_post" | "create_profile_post" | "comment" | "wait";
+      instructions: string;
+      title: string | null;
+      body: string | null;
+      target_url: string | null;
+      wait_for: string[];
+    }[];
+  }[];
+}
+
 export type SessionStatus =
   "queued" | "running" | "done" | "failed" | "stopped";
 

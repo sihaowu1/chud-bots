@@ -38,7 +38,8 @@ explicit route, or profile post), every persona authenticates and stays idle
 for five minutes without browsing, searching, or posting. This
 login-only run does not add a second completion hold. Standalone login/author adapter helpers
 remain explicit operations outside the Dreamer browsing lifecycle.
-For selected legacy personas that use Google, a topic launch also calls
+The **prompt orchestrator** (`backend/search_prompt_selector.py`) assigns search
+prompts to dreamers. For selected legacy personas that use Google, a topic launch calls
 `gpt-5.6-sol` once before opening Steel and assigns each persona a distinct,
 topic-relevant search query. The assignment is keyed by persona so mixed launches
 keep their predetermined queries. A failed or invalid assignment rejects the launch.
@@ -116,6 +117,7 @@ is the only file that imports the Steel SDK.
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
 | `orchestrator_agent.py` | GPT-backed structured task planning, continuation, and durable run audit. |
+| `search_prompt_selector.py` | Prompt orchestrator: assigns distinct topic-relevant search prompts to dreamers before launch. |
 | `campaign_executor.py` | Bounded CLI execution of post/comment/wait assignments, dependencies, and callbacks. |
 | `reddit_runner.py` | Shared CLI publisher: persona locking, authenticated Steel session, author adapter, and cleanup. |
 | `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
@@ -243,6 +245,15 @@ not vote, post, or comment, and does not alter the existing launch flow.
 | POST   | `/api/orchestrations/{id}/activity` | executor callback; records username/content/URLs/timestamps and re-plans by default |
 
 ## Campaign coordinator
+
+The Next.js dashboard query at `localhost:3000` sends its query to the orchestrator through
+`POST /backend/api/orchestrations` (proxied to FastAPI). Its agent count selects
+personas in backend pool order; the dashboard displays the returned summary,
+post/comment/wait assignments, final copy, and dependencies. Plans use the mock
+environment and are not executed by this form. The browser wall still displays
+existing sessions; browser launches remain available through `/api/runs` and the
+static display. The latest plan stays in client memory while navigating; durable
+runs remain available through the orchestration API.
 
 ### Standalone Reddit authoring
 

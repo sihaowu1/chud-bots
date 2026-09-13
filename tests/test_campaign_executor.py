@@ -73,6 +73,72 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         await self.executor.execute(run["id"])
         self.publisher.assert_awaited_once()
 
+    async def test_profile_post_command_uses_profile_post_publisher_action(self):
+        class ProfilePlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Promote from the persona profile.",
+                    "assignments": [{
+                        "persona": "Cobb",
+                        "action": "create_profile_post",
+                        "instructions": "Post under Cobb's profile.",
+                        "target_url": None,
+                        "wait_for": [],
+                        "title": "Why this matters",
+                        "body": "A concise promotional post.",
+                    }],
+                }
+
+        coordinator = CampaignOrchestrator(
+            ProfilePlanner(), Path(self.temp.name) / "profile-runs",
+            Path(self.temp.name) / "profile-logs",
+        )
+        executor = CampaignExecutor(coordinator, self.publisher)
+        run = await coordinator.start(
+            "promote better public transit",
+            selected_personas=["Cobb"],
+            environment="private",
+        )
+
+        result = await executor.execute(run["id"])
+
+        command = self.publisher.call_args.args[0]
+        self.assertEqual(command.action, "profile-post")
+        self.assertEqual(command.request_id, run["phases"][0]["assignments"][0]["id"])
+        self.assertEqual(result["events"][-1]["kind"], "post")
+
+    async def test_comment_can_target_existing_post_url_without_dependency(self):
+        existing_url = "https://mock.local/posts/older-run-p1-t1"
+
+        class ExistingPostPlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Reply to an existing post.",
+                    "assignments": [{
+                        "persona": "Cobb",
+                        "action": "comment",
+                        "instructions": "Add a useful reply to the previous post.",
+                        "target_url": existing_url,
+                        "wait_for": [],
+                        "title": None,
+                        "body": "Adding a follow-up on the existing discussion.",
+                    }],
+                }
+
+        coordinator = CampaignOrchestrator(
+            ExistingPostPlanner(), Path(self.temp.name) / "existing-runs",
+            Path(self.temp.name) / "existing-logs",
+        )
+        executor = CampaignExecutor(coordinator, self.publisher)
+        run = await coordinator.start("promote better public transit", selected_personas=["Cobb"])
+
+        result = await executor.execute(run["id"])
+
+        event = result["events"][-1]
+        self.assertEqual(event["kind"], "comment")
+        self.assertEqual(event["parent_url"], existing_url)
+        self.assertEqual(event["status"], "completed")
+
     async def test_failure_stops_replanning_and_blocks_resume(self):
         self.publisher.side_effect = TimeoutError("Uncertain submission")
         run = await self.start("private")

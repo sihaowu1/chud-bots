@@ -1,4 +1,4 @@
-"""Assign distinct Google searches to the legacy dreamers before launch."""
+"""Prompt orchestrator: assign distinct Google searches to dreamers before launch."""
 
 import json
 from typing import Any

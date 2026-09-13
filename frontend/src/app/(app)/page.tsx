@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { SessionCard } from "@/components/activity/session-card";
+import { CampaignPlanView } from "@/components/activity/campaign-plan";
 import { LaunchPanel } from "@/components/activity/launch-panel";
 import { SessionLog } from "@/components/activity/session-log";
 import { AnimatedNumber } from "@/components/shared/animated-number";
@@ -101,7 +102,8 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="px-6 pb-8 pt-5">
+        <div className="space-y-4 px-6 pb-8 pt-5">
+          <CampaignPlanView />
           {ordered.length === 0 ? (
             <div className="rounded-lg border border-border bg-surface">
               <EmptyState
@@ -110,7 +112,7 @@ export default function DashboardPage() {
                 description={
                   connection === "offline"
                     ? "Start the backend to see live sessions here."
-                    : "Launch agents from the panel on the right. Each one gets a cloud browser you can watch here."
+                    : "Create a plan with the orchestrator from the panel on the right. Browser sessions appear here when launched separately."
                 }
               />
             </div>
@@ -141,8 +143,8 @@ export default function DashboardPage() {
         <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
-              title="Launch agents"
-              subtitle="Each agent gets its own cloud browser"
+              title="Orchestrator"
+              subtitle="Turn your query into agent assignments"
             />
           </div>
           <div className="px-5 py-4">

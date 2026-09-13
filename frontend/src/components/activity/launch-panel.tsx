@@ -9,12 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSessions } from "@/lib/sessions/store";
 import { toast } from "@/components/shared/toast";
 
-/** Launches the backend's Reddit browsing flow, with Yusuf as the profile poster. */
+/** Sends the dashboard query to the orchestrator. */
 export function LaunchPanel() {
-  const launch = useSessions((s) => s.launch);
+  const planCampaign = useSessions((s) => s.planCampaign);
   const stopAll = useSessions((s) => s.stopAll);
   const clear = useSessions((s) => s.clear);
-  const max = useSessions((s) => s.max);
   const running = useSessions(
     (s) => s.agents.filter((a) => a.status === "running").length,
   );
@@ -27,19 +26,17 @@ export function LaunchPanel() {
     e.preventDefault();
     setBusy(true);
     try {
-      await launch({
+      await planCampaign({
         prompt: prompt.trim(),
-        target: "https://www.reddit.com",
-        queries: [],
         count,
       });
       toast({
-        title: `${count} agent${count === 1 ? "" : "s"} launched`,
-        description: "Starting Reddit browsing and Yusuf's profile-post flow",
+        title: "Orchestrator plan ready",
+        description: "Review the assignments on the dashboard",
       });
     } catch (err) {
       toast({
-        title: "Launch failed",
+        title: "Planning failed",
         description: String(err instanceof Error ? err.message : err),
       });
     } finally {
@@ -50,17 +47,16 @@ export function LaunchPanel() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Agents use your query to explore relevant Reddit communities. Yusuf
-        publishes one generated post to his own profile; all other agents only
-        browse and do not post, comment, or vote.
+        The orchestrator uses your query and agent history to assign posts,
+        comments, or waits. Review the plan here; execution is a separate step.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="profile-query" className="text-xs font-normal text-muted-foreground">
           Query
         </Label>
         <Textarea id="profile-query" value={prompt}
-          onChange={(e) => setPrompt(e.target.value)} required maxLength={500}
-          placeholder="What should the agents browse for?" rows={3}
+          onChange={(e) => setPrompt(e.target.value)} required maxLength={2000}
+          placeholder="What should the campaign accomplish?" rows={3}
           className="font-mono text-xs" />
       </div>
       <div className="flex items-end gap-3">
@@ -75,9 +71,9 @@ export function LaunchPanel() {
             id="count"
             type="number"
             min={1}
-            max={Math.min(max || 15, 15)}
+            max={15}
             value={count}
-            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) => setCount(Math.min(15, Math.max(1, Number(e.target.value) || 1)))}
             className="h-8 w-20 font-mono text-xs"
           />
         </div>
@@ -87,7 +83,7 @@ export function LaunchPanel() {
           ) : (
             <Play data-icon="inline-start" />
           )}
-          {busy ? "Planning routes…" : "Launch"}
+          {busy ? "Planning..." : "Create plan"}
         </Button>
       </div>
       <div className="flex items-center gap-1.5 border-t border-border pt-3">

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { BrowserAgent, SessionLogLine } from "./types";
+import type { BrowserAgent, CampaignPlan, SessionLogLine } from "./types";
 
 // ---------------------------------------------------------------------------
 // Live browser sessions. Talks to the FastAPI backend (agent-login branch)
@@ -21,12 +21,11 @@ interface SessionState {
   max: number;
   logs: SessionLogLine[];
   lastError: string | null;
+  campaignPlan: CampaignPlan | null;
 
   start: () => () => void;
-  launch: (body: {
+  planCampaign: (body: {
     prompt: string;
-    target: string;
-    queries: string[];
     count: number;
   }) => Promise<void>;
   stop: (id: string) => Promise<void>;
@@ -74,6 +73,7 @@ export const useSessions = create<SessionState>((set) => ({
   max: 0,
   logs: [],
   lastError: null,
+  campaignPlan: null,
 
   start: () => {
     let cancelled = false;
@@ -156,17 +156,19 @@ export const useSessions = create<SessionState>((set) => ({
     };
   },
 
-  launch: async (body) => {
-    const r = await fetch(`${BACKEND}/api/runs`, {
+  planCampaign: async (body) => {
+    const r = await fetch(`${BACKEND}/api/orchestrations`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, mode: "reddit_browse" }),
+      body: JSON.stringify({ ...body, environment: "mock" }),
     });
     if (!r.ok)
       throw new Error(
         (await r.json().catch(() => ({ detail: r.statusText }))).detail ??
-          "launch failed",
+          "Campaign planning failed",
       );
+    const campaignPlan = (await r.json()) as CampaignPlan;
+    set({ campaignPlan });
   },
 
   stop: async (id) => {

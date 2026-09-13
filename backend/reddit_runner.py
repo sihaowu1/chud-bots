@@ -48,6 +48,8 @@ async def _publish(args):
                 author = RedditAuthor(dreamer, page, dry_run=args.dry_run)
                 if args.action == "post":
                     result = await author.create_post(args.title, args.body, request_id=args.request_id)
+                elif args.action == "profile-post":
+                    result = await author.create_profile_post(args.title, args.body, request_id=args.request_id)
                 elif args.action == "comment":
                     result = await author.comment(args.post_url, args.body, request_id=args.request_id)
                 elif args.action == "reconcile-post":

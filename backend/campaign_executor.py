@@ -66,7 +66,12 @@ class CampaignExecutor:
                     if any(activity.get(dep, {}).get("status") != "completed"
                            for dep in task["wait_for"]):
                         continue
-                    kind = {"create_post": "post", "comment": "comment", "wait": "wait"}[task["action"]]
+                    kind = {
+                        "create_post": "post",
+                        "create_profile_post": "post",
+                        "comment": "comment",
+                        "wait": "wait",
+                    }[task["action"]]
                     async def report(status, **fields):
                         return await self.coordinator.record_activity(
                             run_id, persona=task["persona"], task_id=task["id"],
@@ -88,8 +93,11 @@ class CampaignExecutor:
                             command.body, 40_000 if kind == "post" else 10_000
                         )
                         if run["environment"] == "mock":
+                            path = "profile-posts" if task["action"] == "create_profile_post" else (
+                                "posts" if kind == "post" else "comments"
+                            )
                             result = {
-                                "url": f"https://mock.local/{'posts' if kind == 'post' else 'comments'}/{task['id']}",
+                                "url": f"https://mock.local/{path}/{task['id']}",
                                 "reddit_username": f"synthetic_{task['persona'].lower()}",
                             }
                         else:
@@ -129,7 +137,7 @@ class CampaignExecutor:
         title = task.get("title")
         if not isinstance(body, str) or not body.strip():
             raise ValueError("Assignment needs a concrete body; legacy prose plans must be replanned")
-        if task["action"] == "create_post":
+        if task["action"] in {"create_post", "create_profile_post"}:
             if not isinstance(title, str) or not 1 <= len(title.strip()) <= 300:
                 raise ValueError("Post assignment needs a title of 1 to 300 characters")
             target = None
@@ -148,7 +156,9 @@ class CampaignExecutor:
                     raise ValueError("Mock comments require a mock post URL")
         return SimpleNamespace(
             persona=task["persona"], request_id=task["id"], dry_run=False,
-            action="post" if task["action"] == "create_post" else "comment",
+            action="profile-post" if task["action"] == "create_profile_post"
+            else "post" if task["action"] == "create_post"
+            else "comment",
             title=title, body=body, post_url=target,
         )
 

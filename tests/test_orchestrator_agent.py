@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend import config
+from backend import agent_state_store, config
 from backend.orchestrator_agent import CampaignOrchestrator, _response_output_text
 
 
@@ -21,6 +21,8 @@ class FakePlanner:
                         "persona": "Cobb",
                         "action": "create_post",
                         "instructions": "Create the kickoff post.",
+                        "title": "Synthetic kickoff",
+                        "body": "Test discussion",
                         "target_url": None,
                         "wait_for": [],
                     }
@@ -34,6 +36,8 @@ class FakePlanner:
                     "persona": "Cobb",
                     "action": "wait",
                     "instructions": "Wait until the kickoff post has been processed.",
+                    "title": None,
+                    "body": None,
                     "target_url": None,
                     "wait_for": [first_task],
                 }
@@ -123,6 +127,57 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(run["environment"], "private")
         self.assertEqual(self.planner.contexts[-1]["environment"], "private")
+
+    async def test_promote_prompt_exposes_promotion_target(self):
+        await self.orchestrator.start(
+            "promote better public transit", selected_personas=["Cobb"]
+        )
+
+        self.assertEqual(
+            self.planner.contexts[-1]["promotion_target"],
+            "better public transit",
+        )
+
+    async def test_context_exposes_completed_post_links_from_ledgers(self):
+        agent_state_store.append_activity(
+            "Cobb",
+            {
+                "run_id": "older-run",
+                "task_id": "older-run-p1-t1",
+                "kind": "post",
+                "status": "completed",
+                "content": "A previous kickoff post.",
+                "url": "https://mock.local/posts/older-run-p1-t1",
+                "reddit_username": "synthetic_cobb",
+            },
+        )
+        agent_state_store.append_activity(
+            "Cobb",
+            {
+                "run_id": "profile-run",
+                "task_id": "profile-run-p1-t1",
+                "kind": "post",
+                "status": "completed",
+                "content": "A profile post should not be a comment target.",
+                "url": "https://mock.local/profile-posts/profile-run-p1-t1",
+                "reddit_username": "synthetic_cobb",
+            },
+        )
+
+        await self.orchestrator.start("Add a reply", selected_personas=["Cobb"])
+
+        self.assertEqual(
+            self.planner.contexts[-1]["existing_posts"],
+            [{
+                "persona": "Cobb",
+                "task_id": "older-run-p1-t1",
+                "run_id": "older-run",
+                "url": "https://mock.local/posts/older-run-p1-t1",
+                "content": "A previous kickoff post.",
+                "reddit_username": "synthetic_cobb",
+                "timestamp": self.planner.contexts[-1]["existing_posts"][0]["timestamp"],
+            }],
+        )
 
 
 class ResponseParsingTests(unittest.TestCase):

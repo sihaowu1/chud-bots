@@ -12,12 +12,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
 from . import agent_state_store, config, events, orchestrator_log, personas
 
-ALLOWED_ACTIONS = {"create_post", "comment", "wait"}
+ALLOWED_ACTIONS = {"create_post", "create_profile_post", "comment", "wait"}
 ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
 ALLOWED_ACTIVITY_STATUSES = {"started", "completed", "failed", "cancelled"}
 
@@ -50,18 +51,27 @@ _PLAN_SCHEMA = {
 
 _SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for Reddit content.
 Read and obey the supplied orchestrator instructions. Assign the smallest useful next step to
-each selected persona. The only actions are create_post, comment, and wait.
+each selected persona. The only actions are create_post, create_profile_post, comment, and wait.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
+Use existing_posts when a useful completed post from this or another run is available for a
+comment. For those comments, set target_url to the existing post URL and leave wait_for empty
+unless the comment also depends on a current-run task.
 Do not assign duplicate work that is already completed or in progress. Keep persona voices
-distinct. Supply final title and body for create_post, body for comment, and null
-title/body for wait. Instructions summarize the command. Comments are top-level replies
-only. Use an observed post
+distinct. Supply final title and body for create_post and create_profile_post, body for
+comment, and null title/body for wait. Instructions summarize the command. Comments are
+top-level replies only. Use an observed post
 URL as target_url, or null with exactly one create_post task ID in wait_for whose
 completed URL the executor will use. Only r/HackathonsCanada is supported in private
-runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must reference
-tasks from previous phases. Never issue shell commands.
+runs for create_post and comments. create_profile_post publishes under the persona's own
+profile and uses null target_url. Mock runs use https://mock.local/posts/<task-id> URLs
+or https://mock.local/profile-posts/<task-id> URLs. Dependencies must reference tasks from
+previous phases. Never issue shell commands.
+
+When the user prompt starts with "promote ", treat the remaining text as the cause or idea
+to promote. Prefer create_profile_post assignments for the selected personas so each post is
+published under that persona's own profile.
 
 Never plan platform-control evasion or spam. If the request conflicts with that boundary,
 assign a wait task explaining the blocker.
@@ -212,7 +222,13 @@ class CampaignOrchestrator:
             task = known_tasks[task_id]
             if task["persona"] != persona:
                 raise ValueError("activity persona does not own the task")
-            if kind != {"create_post": "post", "comment": "comment", "wait": "wait"}[task["action"]] and kind != "system":
+            action_kind = {
+                "create_post": "post",
+                "create_profile_post": "post",
+                "comment": "comment",
+                "wait": "wait",
+            }[task["action"]]
+            if kind != action_kind and kind != "system":
                 raise ValueError("activity kind does not match the task")
             activity = {
                 "id": uuid.uuid4().hex[:12],
@@ -329,13 +345,16 @@ class CampaignOrchestrator:
             raise OrchestratorConfigurationError(
                 f"could not read ORCHESTRATOR.md: {exc}"
             ) from exc
+        ledgers = [agent_state_store.public_ledger(name) for name in run["personas"]]
         return {
             "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
+            "promotion_target": _promotion_target(run["prompt"]),
             "environment": run["environment"],
             "run_id": run["id"],
             "previous_phases": run["phases"],
-            "agents": [agent_state_store.public_ledger(name) for name in run["personas"]],
+            "existing_posts": _existing_posts(ledgers),
+            "agents": ledgers,
         }
 
     def _validate_plan(self, plan: dict[str, Any], run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -430,3 +449,52 @@ def _response_output_text(response: dict[str, Any]) -> str:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _promotion_target(prompt: str) -> str | None:
+    prefix = "promote "
+    value = prompt.strip()
+    if not value.lower().startswith(prefix):
+        return None
+    target = value[len(prefix):].strip()
+    return target or None
+
+
+def _existing_posts(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    posts = []
+    seen = set()
+    for ledger in ledgers:
+        for activity in ledger.get("activity", []):
+            if (
+                activity.get("kind") != "post"
+                or activity.get("status") != "completed"
+                or not isinstance(activity.get("url"), str)
+                or not _commentable_post_url(activity["url"])
+            ):
+                continue
+            url = activity["url"]
+            if url in seen:
+                continue
+            seen.add(url)
+            posts.append({
+                "persona": ledger.get("persona"),
+                "task_id": activity.get("task_id"),
+                "run_id": activity.get("run_id"),
+                "url": url,
+                "content": activity.get("content"),
+                "reddit_username": activity.get("reddit_username"),
+                "timestamp": activity.get("timestamp"),
+            })
+    return posts
+
+
+def _commentable_post_url(value: str) -> bool:
+    parsed = urlsplit(value)
+    if parsed.scheme != "https":
+        return False
+    if parsed.netloc == "mock.local":
+        return parsed.path.startswith("/posts/")
+    return (
+        parsed.netloc == "www.reddit.com"
+        and parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+    )

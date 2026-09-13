@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, events, orchestrator, personas, steel_client
+from . import agent_state_store, config, events, orchestrator, personas, steel_client
 from .subreddit_selector import select_subreddits
 from .search_prompt_selector import select_search_prompts
 from .orchestrator_agent import (
@@ -34,6 +34,21 @@ campaign_orchestrator = CampaignOrchestrator()
 profile_post_orchestrator = ProfilePostOrchestrator()
 
 
+def _least_used_personas(count: int, selected_personas: list[str] | None = None) -> list[str]:
+    if selected_personas is not None:
+        return [persona.name for persona in orchestrator.resolve_personas(count, selected_personas)]
+    order = {name: index for index, name in enumerate(personas.names())}
+
+    def usage(name: str) -> tuple[int, int]:
+        ledger = agent_state_store.public_ledger(name)
+        return (
+            len(ledger.get("assignments", [])) + len(ledger.get("activity", [])),
+            order[name],
+        )
+
+    return sorted(personas.names(), key=usage)[:count]
+
+
 class LaunchRequest(BaseModel):
     prompt: str = Field("", max_length=2000)
     mode: Literal["legacy", "reddit_browse", "profile_post"] = "legacy"
@@ -49,6 +64,7 @@ class LaunchRequest(BaseModel):
 class OrchestrationRequest(BaseModel):
     prompt: str = Field(..., min_length=1)
     personas: list[str] | None = None
+    count: int | None = Field(None, ge=1, le=15)
     environment: str = Field("mock", pattern="^(mock|private)$")
 
 
@@ -141,9 +157,15 @@ async def launch(req: LaunchRequest):
 async def create_orchestration(req: OrchestrationRequest):
     """Ask the model coordinator to create the first phase of assignments."""
     try:
+        prompt = req.prompt.strip()
+        if not prompt:
+            raise ValueError("campaign prompt cannot be blank")
+        selected_personas = req.personas
+        if req.count is not None:
+            selected_personas = _least_used_personas(req.count, req.personas)
         return await campaign_orchestrator.start(
-            req.prompt,
-            selected_personas=req.personas,
+            prompt,
+            selected_personas=selected_personas,
             environment=req.environment,
         )
     except ValueError as exc:
