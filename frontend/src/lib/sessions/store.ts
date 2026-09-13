@@ -2,12 +2,10 @@
 
 import { create } from "zustand";
 import type { BrowserAgent, SessionLogLine } from "./types";
-import { MockFleet } from "./mock";
 
 // ---------------------------------------------------------------------------
 // Live browser sessions. Talks to the FastAPI backend (agent-login branch)
-// through the /backend proxy. If the backend is unreachable the store runs a
-// mock fleet instead, and keeps probing so it switches to live automatically.
+// through the /backend proxy, and keeps probing until it's reachable.
 // ---------------------------------------------------------------------------
 
 export const BACKEND = "/backend";
@@ -15,7 +13,7 @@ const POLL_LIVE_MS = 1500;
 const POLL_PROBE_MS = 8000;
 const MAX_LOG = 200;
 
-export type SessionConnection = "connecting" | "live" | "mock" | "offline";
+export type SessionConnection = "connecting" | "live" | "offline";
 
 interface SessionState {
   connection: SessionConnection;
@@ -23,7 +21,6 @@ interface SessionState {
   max: number;
   logs: SessionLogLine[];
   lastError: string | null;
-  useMockFallback: boolean;
 
   start: () => () => void;
   launch: (body: {
@@ -34,10 +31,8 @@ interface SessionState {
   stop: (id: string) => Promise<void>;
   stopAll: () => Promise<void>;
   clear: () => Promise<void>;
-  setUseMockFallback: (v: boolean) => void;
 }
 
-let fleet: MockFleet | null = null;
 let logSeq = 0;
 
 function pushLogs(existing: SessionLogLine[], incoming: SessionLogLine[]) {
@@ -74,7 +69,6 @@ export const useSessions = create<SessionState>((set, get) => ({
   max: 0,
   logs: [],
   lastError: null,
-  useMockFallback: true,
 
   start: () => {
     let cancelled = false;
@@ -129,7 +123,6 @@ export const useSessions = create<SessionState>((set, get) => ({
           max: number;
         };
         failures = 0;
-        if (fleet) fleet = null;
         set((s) => ({
           connection: "live",
           max: data.max,
@@ -141,23 +134,7 @@ export const useSessions = create<SessionState>((set, get) => ({
         timer = setTimeout(poll, POLL_LIVE_MS);
       } catch (err) {
         failures++;
-        const s = get();
-        if (failures >= 2 && s.useMockFallback) {
-          if (!fleet) {
-            fleet = new MockFleet(4);
-            set({
-              connection: "mock",
-              max: 8,
-              agents: [],
-              lastError: String(err),
-            });
-          }
-          const t = fleet.tick();
-          set((st) => ({ agents: t.agents, logs: pushLogs(st.logs, t.logs) }));
-          timer = setTimeout(poll, 700);
-          // Probe the backend less often while mocking.
-          if (failures % Math.round(POLL_PROBE_MS / 700) !== 0) return;
-        } else if (failures >= 2) {
+        if (failures >= 2) {
           set({ connection: "offline", agents: [], lastError: String(err) });
           timer = setTimeout(poll, POLL_PROBE_MS);
         } else {
@@ -171,15 +148,10 @@ export const useSessions = create<SessionState>((set, get) => ({
       cancelled = true;
       clearTimeout(timer);
       es?.close();
-      fleet = null;
     };
   },
 
   launch: async (body) => {
-    if (fleet) {
-      fleet.launch(body.target, body.queries, body.count);
-      return;
-    }
     const r = await fetch(`${BACKEND}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -193,28 +165,14 @@ export const useSessions = create<SessionState>((set, get) => ({
   },
 
   stop: async (id) => {
-    if (fleet) {
-      fleet.stop(id);
-      return;
-    }
     await fetch(`${BACKEND}/api/agents/${id}/stop`, { method: "POST" });
   },
 
   stopAll: async () => {
-    if (fleet) {
-      fleet.stopAll();
-      return;
-    }
     await fetch(`${BACKEND}/api/stop-all`, { method: "POST" });
   },
 
   clear: async () => {
-    if (fleet) {
-      fleet.clear();
-      return;
-    }
     await fetch(`${BACKEND}/api/clear`, { method: "POST" });
   },
-
-  setUseMockFallback: (v) => set({ useMockFallback: v }),
 }));

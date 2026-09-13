@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useSim } from "@/lib/store";
+import { useSessions } from "@/lib/sessions/store";
 import { ActivityFeed } from "@/components/logs/activity-feed";
 import { ActivityDetail } from "@/components/logs/activity-detail";
 import { Inspector } from "@/components/shared/inspector";
@@ -11,8 +11,18 @@ import { AnimatedNumber } from "@/components/shared/animated-number";
 
 export default function ActivityPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const events = useSim((s) => s.events);
-  const selected = events.find((e) => e.id === selectedId) ?? null;
+  const logs = useSessions((s) => s.logs);
+  const agents = useSessions((s) => s.agents);
+  const connection = useSessions((s) => s.connection);
+  const line = logs.find((e) => e.id === selectedId) ?? null;
+  const selected = line
+    ? {
+        ...line,
+        agent: line.persona
+          ? agents.find((a) => a.persona === line.persona)
+          : undefined,
+      }
+    : null;
 
   return (
     <div className="flex h-full min-h-0">
@@ -25,12 +35,12 @@ export default function ActivityPage() {
               <>
                 <span className="text-xs text-muted-foreground">
                   <AnimatedNumber
-                    value={events.length}
+                    value={logs.length}
                     className="font-mono text-foreground"
                   />{" "}
                   events this session
                 </span>
-                <LiveIndicator />
+                <LiveIndicator connection={connection} />
               </>
             }
           />
@@ -47,8 +57,8 @@ export default function ActivityPage() {
       <Inspector
         open={!!selected}
         onClose={() => setSelectedId(null)}
-        title={selected?.action}
-        subtitle={selected?.context}
+        title={selected?.persona ?? "Log"}
+        subtitle={selected?.agent?.target}
         width={440}
       >
         {selected && <ActivityDetail event={selected} layout="panel" />}

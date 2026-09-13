@@ -20,10 +20,13 @@ summarization.
 ### Current implementation
 
 The code implements the earlier search-traffic prototype and a model-backed
-campaign coordinator. The coordinator reads this file and the durable agent
-ledgers, then assigns `create_post`, `comment`, or `wait` tasks. Executor
-adapters, Reddit authoring/posting, and AI Overview evaluation are not yet
-implemented. Keep that distinction explicit when changing this document or
+campaign coordinator. The coordinator reads `ORCHESTRATOR.md` and the durable agent
+ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone
+Reddit author adapter supports posts and top-level comments in
+r/HackathonsCanada through a logged-in Steel browser. The CLI executor now connects structured
+campaign assignments to this adapter for configured Reddit runs, with a local
+mock executor for testing. AI Overview evaluation is not implemented.
+Keep that distinction explicit when changing this document or
 presenting the project.
 
 ## Layout
@@ -50,8 +53,11 @@ is the only file that imports the Steel SDK.
 | `steel_client.py`| Thin wrapper over `steel-sdk`: create / release / list sessions. |
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
-| `orchestrator_agent.py` | GPT-backed campaign task planning, continuation, and durable run audit. It does not post. |
+| `orchestrator_agent.py` | GPT-backed structured task planning, continuation, and durable run audit. |
+| `campaign_executor.py` | Bounded CLI execution of post/comment/wait assignments, dependencies, and callbacks. |
+| `reddit_runner.py` | Shared CLI publisher: persona locking, authenticated Steel session, author adapter, and cleanup. |
 | `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
+| `reddit_author.py` | Browser-driven test posts/comments, identity checks, verification, and durable submission receipts. |
 
 The backend also serves `analytics/` (discoverability presence probes and
 `/api/discoverability/*`), included from `main.py`. See `analytics/agents.md`.
@@ -127,12 +133,20 @@ A launch runs 1-8 dreamers (`MAX_AGENTS`, capped at 8). Login uses the saved
 email address and password.
 It opens Reddit's home page and clicks Log In before entering credentials.
 Login succeeds only when Reddit's home page is loaded and `/api/me.json`
-confirms a signed-in identity. The login-only 10-second hold starts then;
+confirms a signed-in identity. The login-only 5-minute hold starts then;
 rejected credentials or a 60-second confirmation timeout fail the run.
 Run `uv run python scripts/check_yusuf_login.py` for one live login check with
 a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 
 ## API
+
+Read-only Reddit browsing can be checked separately with
+`uv run python scripts/check_yusuf_reddit.py --query python`. This uses one
+Yusuf Steel session and his saved credentials/profile, scrolls the home page,
+then navigates to community search results and scrolls them. Screenshots go to
+`scripts/reddit-check/` (gitignored); the session is released afterward.
+`backend/reddit_browser.py` provides the navigation helpers. This check does
+not vote, post, or comment, and does not alter the existing launch flow.
 
 | method | path                      | body / notes |
 |--------|---------------------------|--------------|
@@ -150,17 +164,114 @@ a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 
 ## Campaign coordinator
 
+### Standalone Reddit authoring
+
+Any named persona with a saved Reddit login/Steel profile can publish through
+`scripts/reddit_publish.py`. This separate runner does not use the launch UI.
+It restores the persona profile, checks the signed-in identity, fills Reddit's
+browser composer, clicks once, verifies the saved content, and releases Steel.
+All content targets r/HackathonsCanada.
+Once the community is private, the account must have access granted by its owner.
+Pass `--dry-run` before `post` or `comment` to fill the composer and check its
+submit control without clicking or creating a submission receipt.
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Cobb --request-id question-001 post --title "Anyone doing Battle of the Schools?" --body "What are you planning to build?"
+uv run python scripts/reddit_publish.py --persona Arthur --request-id reply-001 comment --post-url "https://www.reddit.com/r/HackathonsCanada/comments/POST_ID/POST_SLUG/" --body "Testing the comment workflow."
+```
+
+Use the same `--request-id` when repeating a command. Confirmed requests return
+their existing permalink; a reused ID with different content is rejected.
+Receipts live in the gitignored `backend/agent_states/reddit_receipts/` directory.
+A timeout after the submit attempt leaves an uncertain receipt and blocks repeat
+submission. Inspect Reddit first. An observed post ID can be reconciled without
+another write to Reddit:
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Cobb --request-id question-001 reconcile-post --post-id t3_POST_ID
+```
+
+Confirmed submissions also enter the persona activity ledger. Screenshots are
+saved to `scripts/reddit-check/`. Confirmation means Reddit saved the content;
+moderation can still filter it, and results include `removed_by_category` for posts.
+Comments currently support top-level replies to post permalinks only. Reuse the
+same request ID, post URL, and body to retrieve the existing confirmed comment.
+If a submission is uncertain, inspect Reddit for the comment first, then verify
+its ID without submitting another reply:
+
+```powershell
+uv run python scripts/reddit_publish.py --persona Arthur --request-id reply-001 reconcile-comment --comment-id t1_COMMENT_ID
+```
+
+Reconciliation checks the original account, exact body, parent post, and community
+before confirming the receipt. If the comment cannot be found or verified, the
+receipt stays uncertain and blocks resubmission. There is no automatic retry of
+the submit click. Comment verification/recovery is covered with mocked Reddit
+responses (`uv run python -m unittest discover -s tests -p test_reddit_author.py`);
+a live comment submission has not been tested.
+
+Call `RedditAuthor(dreamer, page).create_post(...)` or `.comment(...)` to reuse
+the adapter in an existing authenticated Steel session. Serialize publishing
+operations for each persona/profile; different request IDs are independent.
+
+### Planning
+
 Set `OPENAI_API_KEY`, then send the user's campaign prompt to
 `POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium
 reasoning by default; both values can be overridden with
 `ORCHESTRATOR_MODEL` and `ORCHESTRATOR_REASONING_EFFORT`.
 
-Each phase produces assignments only. A future mock/private-environment adapter
-executes them and reports results through the activity endpoint. Every persona
+The HTTP planning endpoints produce assignments only. Execute them through the
+existing CLI, or start and execute a campaign in one command (OPENAI_API_KEY is
+needed for planning, including mock mode):
+
+```powershell
+uv run python scripts/reddit_publish.py orchestrate --prompt "Create a kickoff, then a reply" --personas Cobb Arthur --phases 2
+uv run python scripts/reddit_publish.py orchestrate --run-id RUN_ID
+uv run python scripts/reddit_publish.py orchestrate --prompt "Run our Reddit demo" --personas Cobb Arthur --environment private --phases 2
+```
+
+Mock is the default: it records synthetic URLs and activity without opening Steel
+or changing saved Reddit identities. Commands contain final `title`/`body` fields.
+Legacy prose-only assignments fail without posting.
+
+Execution is serial and bounded by `--phases` (default 1). Each batch executes
+pending assignments, reports results without per-task replanning, then replans
+only if the batch completed productive work and another batch is allowed. Wait-only
+or blocked batches stop. A comment can take its target from exactly one completed
+post dependency in `wait_for`; dependencies must reference earlier phases.
+Completed tasks are skipped on resume. To plan further work after a completed run,
+call the existing `/continue` endpoint before executing its pending assignments.
+The CLI ends with a concise summary of completed, failed, and pending assignments;
+the full durable run remains available in the run audit and orchestration endpoint.
+
+Task IDs are publishing request IDs. Failed or interrupted tasks block resumed
+execution. Inspect/reconcile the existing Reddit receipt with the standalone CLI,
+then report the verified result through `/activity` with the original task ID and
+`continue_after: false`. Cancel an unsubmitted task through that endpoint if it
+should be abandoned. Never mark an uncertain submission cancelled just to retry it.
+The executor lock and per-persona publisher locks reject overlapping CLI runs; after
+a process crash, inspect the process and receipts before removing the corresponding
+`execution.lock` or `publisher_locks/*.lock`. Do not run HTTP planning/callback
+mutations concurrently with the CLI executor, or run the launch/login flow against
+the same persona while publishing. The executor does not register browser sessions
+in the launch UI or implement AI Overview evaluation.
+
+Execution and recovery tests use fake planners/publishers; no live campaign has
+been submitted as part of this integration.
+
+Every persona
 has a JSON ledger under `backend/agent_states/` containing its Reddit username,
 assignments, and timestamped post/comment/wait activity. Each orchestration also
 has an aggregate JSON audit under `backend/orchestrator_runs/`. Credentials are
 kept out of the context sent to the model.
+
+Each orchestration also gets an append-only trace in `orchestrator_logs/<run-id>/`.
+Files are numbered from `0.json`; every later file is a cumulative snapshot that
+references and includes the prior entries. Entries distinguish the exposed model
+plan summary/context (`thinking`), persisted assignments (`action`), activity and
+publisher results (`output`), and executor invocations/generated commands (`cli`).
+The API does not expose private model chain-of-thought, so it is never logged.
 
 ## Steel specifics that bit us
 

@@ -20,7 +20,7 @@ class FakePlanner:
                     {
                         "persona": "Cobb",
                         "action": "create_post",
-                        "instructions": "Create a clearly labeled synthetic kickoff post.",
+                        "instructions": "Create the kickoff post.",
                         "target_url": None,
                         "wait_for": [],
                     }
@@ -51,6 +51,7 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.orchestrator = CampaignOrchestrator(
             planner=self.planner,
             runs_dir=root / "runs",
+            logs_dir=root / "logs",
         )
 
     async def asyncTearDown(self):
@@ -69,9 +70,14 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["assignments"][0]["id"], task["id"])
         self.assertIn("activity", state)
         self.assertNotIn("email", self.planner.contexts[0]["agents"][0])
-        repository_instructions = self.planner.contexts[0]["repository_instructions"]
-        self.assertTrue(repository_instructions.startswith("# agents.md"))
-        self.assertIn("## What this is", repository_instructions)
+        orchestrator_instructions = self.planner.contexts[0]["orchestrator_instructions"]
+        self.assertTrue(orchestrator_instructions.startswith("# Inception orchestrator prompt"))
+        self.assertIn("## Objective", orchestrator_instructions)
+        snapshots = sorted((Path(self.temp_dir.name) / "logs" / run["id"]).glob("*.json"))
+        self.assertEqual([path.name for path in snapshots], ["0.json", "1.json"])
+        latest = json.loads(snapshots[-1].read_text(encoding="utf-8"))
+        self.assertEqual([entry["kind"] for entry in latest["entries"]], ["thinking", "action"])
+        self.assertEqual(latest["previous"], "0.json")
 
     async def test_activity_is_timestamped_and_triggers_next_phase(self):
         run = await self.orchestrator.start("Staged demo", selected_personas=["Cobb"])
@@ -90,7 +96,7 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(updated["phases"]), 2)
         ledger = updated["agent_ledgers"]["Cobb"]
-        self.assertEqual(ledger["reddit_username"], "synthetic_cobb")
+        self.assertIsNone(ledger["reddit_username"])
         self.assertEqual(ledger["activity"][0]["url"], "https://mock.local/posts/1")
         self.assertEqual(ledger["activity"][0]["reddit_username"], "synthetic_cobb")
         self.assertIn("timestamp", ledger["activity"][0])
@@ -107,6 +113,16 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 kind="post",
                 status="completed",
             )
+
+    async def test_private_environment_is_sent_to_planner(self):
+        run = await self.orchestrator.start(
+            "Private demo",
+            selected_personas=["Cobb"],
+            environment="private",
+        )
+
+        self.assertEqual(run["environment"], "private")
+        self.assertEqual(self.planner.contexts[-1]["environment"], "private")
 
 
 class ResponseParsingTests(unittest.TestCase):

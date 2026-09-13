@@ -39,15 +39,10 @@ const CONN: Record<
     pulse: true,
     hint: "Streaming from the Inception backend. Viewers are Steel's live debug sessions.",
   },
-  mock: {
-    label: "Simulated",
-    tone: "warning",
-    hint: "Backend not reachable — showing a simulated fleet. Start `uvicorn backend.main:app` to go live.",
-  },
   offline: {
     label: "Offline",
     tone: "danger",
-    hint: "Backend not reachable and simulation is off (Settings → Demo mode).",
+    hint: "Backend not reachable. Start `uvicorn backend.main:app` to go live.",
   },
 };
 
@@ -111,7 +106,7 @@ export default function ActivityPage() {
                 }
                 description={
                   connection === "offline"
-                    ? "Start the backend, or enable simulated activity in Settings → Demo mode."
+                    ? "Start the backend to see live sessions here."
                     : "Launch agents from the panel on the right. Each one gets a cloud browser you can watch here."
                 }
               />

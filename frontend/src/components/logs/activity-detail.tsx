@@ -1,40 +1,22 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
-import type { ActivityEvent } from "@/lib/types";
-import { useSim } from "@/lib/store";
-import { ROLE_LABEL } from "@/lib/mock/agents";
+import type { LogRow } from "./types";
 import { Field } from "@/components/shared/section";
-import { Score } from "@/components/shared/score";
-import { EventStatusBadge } from "@/components/shared/event-status";
+import { AgentStatusBadge } from "@/components/shared/agent-status";
 import { clock } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const RISK_TONE = {
-  low: "text-success",
-  medium: "text-warning",
-  high: "text-danger",
-} as const;
-
-/**
- * Concise decision summary for an event. Deliberately shows conclusions and
- * evidence, not a transcript of the agent's reasoning.
- */
+/** Shows what's actually available for a log line: persona, level, message,
+ * timestamp, and — when the line ties back to a live agent — that agent's
+ * status, target, query and session link. */
 export function ActivityDetail({
   event,
   layout = "inline",
 }: {
-  event: ActivityEvent;
+  event: LogRow;
   layout?: "inline" | "panel";
 }) {
-  const agent = useSim((s) => s.agents.find((a) => a.id === event.agentId));
-  const d = event.detail;
-  const opp = useSim((s) =>
-    d.opportunityId
-      ? s.opportunities.find((o) => o.id === d.opportunityId)
-      : undefined,
-  );
+  const agent = event.agent;
 
   const grid =
     layout === "inline"
@@ -51,33 +33,27 @@ export function ActivityDetail({
     >
       <div className={grid}>
         <div className="space-y-4">
-          <Field label="Agent">
-            <span className="font-mono text-xs">
-              {agent?.name ?? event.agentId}
-            </span>
-            {agent && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                {ROLE_LABEL[agent.role]}
+          {event.persona && (
+            <Field label="Agent">
+              <span className="font-mono text-xs">{event.persona}</span>
+              {event.level !== undefined && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  Level {event.level}
+                </span>
+              )}
+            </Field>
+          )}
+          <Field label="Message">
+            <p className={cn(event.error ? "text-danger" : "text-muted-foreground")}>
+              {event.msg}
+            </p>
+          </Field>
+          {agent?.query && <Field label="Query">“{agent.query}”</Field>}
+          {agent?.url && (
+            <Field label="URL">
+              <span className="break-all font-mono text-xs text-muted-foreground">
+                {agent.url}
               </span>
-            )}
-          </Field>
-          <Field label="Task">{d.task}</Field>
-          <Field label="Reasoning summary">
-            <p className="text-muted-foreground">“{d.summary}”</p>
-          </Field>
-          {d.evidence && d.evidence.length > 0 && (
-            <Field label="Evidence">
-              <ul className="space-y-1">
-                {d.evidence.map((e) => (
-                  <li
-                    key={e}
-                    className="flex gap-2 text-xs text-muted-foreground"
-                  >
-                    <span className="mt-[7px] size-1 shrink-0 rounded-full bg-fg-subtle" />
-                    {e}
-                  </li>
-                ))}
-              </ul>
             </Field>
           )}
         </div>
@@ -87,46 +63,31 @@ export function ActivityDetail({
           )}
         >
           <div className="divide-y divide-border">
-            <Field label="Status" inline>
-              <EventStatusBadge status={event.status} />
-            </Field>
             <Field label="Time" inline>
               <span className="font-mono">{clock(event.ts)}</span>
             </Field>
-            {(d.relevance !== undefined || event.score !== undefined) && (
-              <Field
-                label={
-                  event.category === "analysis" &&
-                  event.action.startsWith("Intent")
-                    ? "Confidence"
-                    : "Relevance"
-                }
-                inline
-              >
-                <Score value={d.relevance ?? event.score!} bar />
+            {agent && (
+              <Field label="Agent status" inline>
+                <AgentStatusBadge status={agent.status} />
               </Field>
             )}
-            {d.risk && (
-              <Field label="Risk" inline>
-                <span className={cn("capitalize", RISK_TONE[d.risk])}>
-                  {d.risk}
+            {agent?.target && (
+              <Field label="Target" inline>
+                <span className="truncate font-mono text-xs">
+                  {agent.target}
                 </span>
               </Field>
             )}
-            {d.metrics?.map((m) => (
-              <Field key={m.label} label={m.label} inline>
-                <span className="font-mono">{m.value}</span>
-              </Field>
-            ))}
-            {opp && (
-              <Field label="Opportunity" inline>
-                <Link
-                  href={`/opportunities?id=${opp.id}`}
-                  className="inline-flex items-center gap-1 text-signal hover:underline"
+            {agent?.session?.viewer_url && (
+              <Field label="Session" inline>
+                <a
+                  href={agent.session.viewer_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-signal hover:underline"
                 >
-                  {opp.community}
-                  <ArrowUpRight className="size-3" />
-                </Link>
+                  Open in Steel
+                </a>
               </Field>
             )}
           </div>

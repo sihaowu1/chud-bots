@@ -1,0 +1,1083 @@
+warning: in the working copy of 'frontend/src/app/(app)/logs/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/logs/activity-detail.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/logs/activity-feed.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/logs/activity-filters.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/logs/activity-row.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/shared/live-indicator.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/lib/filters.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/backend/personas.py b/backend/personas.py
+index 38f4a10..48c429c 100644
+--- a/backend/personas.py
++++ b/backend/personas.py
+@@ -21,8 +21,8 @@ class Persona:
+ 
+ _POOL = [
+     # Yusuf is first temporarily so login runs exercise his saved credentials during testing.
+-    Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
+-    Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
++    # Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
++    # Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
+     Persona("Arthur", False, (40, 90), 2, (2, 4), ["fast typist", "desktop"]),
+     Persona("Ariadne", False, (90, 200), 3, (4, 8), ["desktop", "scroller"]),
+     Persona("Eames", False, (70, 160), 1, (2, 3), ["skimmer", "desktop"]),
+diff --git a/frontend/src/app/(app)/logs/page.tsx b/frontend/src/app/(app)/logs/page.tsx
+index 0e12cf3..20293f7 100644
+--- a/frontend/src/app/(app)/logs/page.tsx
++++ b/frontend/src/app/(app)/logs/page.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+ import { useState } from "react";
+-import { useSim } from "@/lib/store";
++import { useSessions } from "@/lib/sessions/store";
+ import { ActivityFeed } from "@/components/logs/activity-feed";
+ import { ActivityDetail } from "@/components/logs/activity-detail";
+ import { Inspector } from "@/components/shared/inspector";
+@@ -11,8 +11,18 @@ import { AnimatedNumber } from "@/components/shared/animated-number";
+ 
+ export default function ActivityPage() {
+   const [selectedId, setSelectedId] = useState<string | null>(null);
+-  const events = useSim((s) => s.events);
+-  const selected = events.find((e) => e.id === selectedId) ?? null;
++  const logs = useSessions((s) => s.logs);
++  const agents = useSessions((s) => s.agents);
++  const connection = useSessions((s) => s.connection);
++  const line = logs.find((e) => e.id === selectedId) ?? null;
++  const selected = line
++    ? {
++        ...line,
++        agent: line.persona
++          ? agents.find((a) => a.persona === line.persona)
++          : undefined,
++      }
++    : null;
+ 
+   return (
+     <div className="flex h-full min-h-0">
+@@ -25,12 +35,12 @@ export default function ActivityPage() {
+               <>
+                 <span className="text-xs text-muted-foreground">
+                   <AnimatedNumber
+-                    value={events.length}
++                    value={logs.length}
+                     className="font-mono text-foreground"
+                   />{" "}
+                   events this session
+                 </span>
+-                <LiveIndicator />
++                <LiveIndicator connection={connection} />
+               </>
+             }
+           />
+@@ -47,8 +57,8 @@ export default function ActivityPage() {
+       <Inspector
+         open={!!selected}
+         onClose={() => setSelectedId(null)}
+-        title={selected?.action}
+-        subtitle={selected?.context}
++        title={selected?.persona ?? "Log"}
++        subtitle={selected?.agent?.target}
+         width={440}
+       >
+         {selected && <ActivityDetail event={selected} layout="panel" />}
+diff --git a/frontend/src/components/logs/activity-detail.tsx b/frontend/src/components/logs/activity-detail.tsx
+index 95e97db..b233b03 100644
+--- a/frontend/src/components/logs/activity-detail.tsx
++++ b/frontend/src/components/logs/activity-detail.tsx
+@@ -1,40 +1,22 @@
+ "use client";
+ 
+-import Link from "next/link";
+-import { ArrowUpRight } from "lucide-react";
+-import type { ActivityEvent } from "@/lib/types";
+-import { useSim } from "@/lib/store";
+-import { ROLE_LABEL } from "@/lib/mock/agents";
++import type { LogRow } from "./types";
+ import { Field } from "@/components/shared/section";
+-import { Score } from "@/components/shared/score";
+-import { EventStatusBadge } from "@/components/shared/event-status";
++import { AgentStatusBadge } from "@/components/shared/agent-status";
+ import { clock } from "@/lib/format";
+ import { cn } from "@/lib/utils";
+ 
+-const RISK_TONE = {
+-  low: "text-success",
+-  medium: "text-warning",
+-  high: "text-danger",
+-} as const;
+-
+-/**
+- * Concise decision summary for an event. Deliberately shows conclusions and
+- * evidence, not a transcript of the agent's reasoning.
+- */
++/** Shows what's actually available for a log line: persona, level, message,
++ * timestamp, and — when the line ties back to a live agent — that agent's
++ * status, target, query and session link. */
+ export function ActivityDetail({
+   event,
+   layout = "inline",
+ }: {
+-  event: ActivityEvent;
++  event: LogRow;
+   layout?: "inline" | "panel";
+ }) {
+-  const agent = useSim((s) => s.agents.find((a) => a.id === event.agentId));
+-  const d = event.detail;
+-  const opp = useSim((s) =>
+-    d.opportunityId
+-      ? s.opportunities.find((o) => o.id === d.opportunityId)
+-      : undefined,
+-  );
++  const agent = event.agent;
+ 
+   const grid =
+     layout === "inline"
+@@ -51,33 +33,27 @@ export function ActivityDetail({
+     >
+       <div className={grid}>
+         <div className="space-y-4">
+-          <Field label="Agent">
+-            <span className="font-mono text-xs">
+-              {agent?.name ?? event.agentId}
+-            </span>
+-            {agent && (
+-              <span className="ml-2 text-xs text-muted-foreground">
+-                {ROLE_LABEL[agent.role]}
+-              </span>
+-            )}
+-          </Field>
+-          <Field label="Task">{d.task}</Field>
+-          <Field label="Reasoning summary">
+-            <p className="text-muted-foreground">“{d.summary}”</p>
++          {event.persona && (
++            <Field label="Agent">
++              <span className="font-mono text-xs">{event.persona}</span>
++              {event.level !== undefined && (
++                <span className="ml-2 text-xs text-muted-foreground">
++                  Level {event.level}
++                </span>
++              )}
++            </Field>
++          )}
++          <Field label="Message">
++            <p className={cn(event.error ? "text-danger" : "text-muted-foreground")}>
++              {event.msg}
++            </p>
+           </Field>
+-          {d.evidence && d.evidence.length > 0 && (
+-            <Field label="Evidence">
+-              <ul className="space-y-1">
+-                {d.evidence.map((e) => (
+-                  <li
+-                    key={e}
+-                    className="flex gap-2 text-xs text-muted-foreground"
+-                  >
+-                    <span className="mt-[7px] size-1 shrink-0 rounded-full bg-fg-subtle" />
+-                    {e}
+-                  </li>
+-                ))}
+-              </ul>
++          {agent?.query && <Field label="Query">“{agent.query}”</Field>}
++          {agent?.url && (
++            <Field label="URL">
++              <span className="break-all font-mono text-xs text-muted-foreground">
++                {agent.url}
++              </span>
+             </Field>
+           )}
+         </div>
+@@ -87,46 +63,31 @@ export function ActivityDetail({
+           )}
+         >
+           <div className="divide-y divide-border">
+-            <Field label="Status" inline>
+-              <EventStatusBadge status={event.status} />
+-            </Field>
+             <Field label="Time" inline>
+               <span className="font-mono">{clock(event.ts)}</span>
+             </Field>
+-            {(d.relevance !== undefined || event.score !== undefined) && (
+-              <Field
+-                label={
+-                  event.category === "analysis" &&
+-                  event.action.startsWith("Intent")
+-                    ? "Confidence"
+-                    : "Relevance"
+-                }
+-                inline
+-              >
+-                <Score value={d.relevance ?? event.score!} bar />
++            {agent && (
++              <Field label="Agent status" inline>
++                <AgentStatusBadge status={agent.status} />
+               </Field>
+             )}
+-            {d.risk && (
+-              <Field label="Risk" inline>
+-                <span className={cn("capitalize", RISK_TONE[d.risk])}>
+-                  {d.risk}
++            {agent?.target && (
++              <Field label="Target" inline>
++                <span className="truncate font-mono text-xs">
++                  {agent.target}
+                 </span>
+               </Field>
+             )}
+-            {d.metrics?.map((m) => (
+-              <Field key={m.label} label={m.label} inline>
+-                <span className="font-mono">{m.value}</span>
+-              </Field>
+-            ))}
+-            {opp && (
+-              <Field label="Opportunity" inline>
+-                <Link
+-                  href={`/opportunities?id=${opp.id}`}
+-                  className="inline-flex items-center gap-1 text-signal hover:underline"
++            {agent?.session?.viewer_url && (
++              <Field label="Session" inline>
++                <a
++                  href={agent.session.viewer_url}
++                  target="_blank"
++                  rel="noreferrer"
++                  className="text-signal hover:underline"
+                 >
+-                  {opp.community}
+-                  <ArrowUpRight className="size-3" />
+-                </Link>
++                  Open in Steel
++                </a>
+               </Field>
+             )}
+           </div>
+diff --git a/frontend/src/components/logs/activity-feed.tsx b/frontend/src/components/logs/activity-feed.tsx
+index 05c2f81..ee49018 100644
+--- a/frontend/src/components/logs/activity-feed.tsx
++++ b/frontend/src/components/logs/activity-feed.tsx
+@@ -2,11 +2,10 @@
+ 
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { AnimatePresence, motion } from "framer-motion";
+-import { ArrowDown, Inbox, Pause } from "lucide-react";
+-import { useRouter } from "next/navigation";
+-import { useSim } from "@/lib/store";
+-import { useActivityFilters, CATEGORY_FILTERS } from "@/lib/filters";
+-import type { ActivityEvent } from "@/lib/types";
++import { ArrowDown, Inbox } from "lucide-react";
++import { useSessions } from "@/lib/sessions/store";
++import { useActivityFilters } from "@/lib/filters";
++import type { LogRow } from "./types";
+ import { ActivityRow, ROW_GRID, ROW_GRID_COMPACT } from "./activity-row";
+ import { ActivityDetail } from "./activity-detail";
+ import { CategorySegments, SecondaryFilters } from "./activity-filters";
+@@ -24,25 +23,22 @@ interface Props {
+   compact?: boolean;
+   showFilters?: boolean;
+   showSecondaryFilters?: boolean;
+-  /** Agent to visually emphasise (e.g. hovered in another panel). */
++  /** Agent (by BrowserAgent id) to visually emphasise (e.g. hovered in another panel). */
+   highlightAgentId?: string | null;
+   className?: string;
+   listClassName?: string;
+ }
+ 
+-export function useFilteredEvents(events: ActivityEvent[]) {
+-  const { category, agentId, platform, status } = useActivityFilters();
++export function useFilteredEvents(rows: LogRow[]) {
++  const { status, persona, errorOnly } = useActivityFilters();
+   return useMemo(() => {
+-    const cat = CATEGORY_FILTERS.find((c) => c.value === category);
+-    return events.filter((e) => {
+-      if (cat && cat.value !== "all" && !cat.match.includes(e.category))
+-        return false;
+-      if (agentId && e.agentId !== agentId) return false;
+-      if (platform && e.platform !== platform) return false;
+-      if (status && e.status !== status) return false;
++    return rows.filter((r) => {
++      if (status !== "all" && r.agent?.status !== status) return false;
++      if (persona && r.persona !== persona) return false;
++      if (errorOnly && !r.error) return false;
+       return true;
+     });
+-  }, [events, category, agentId, platform, status]);
++  }, [rows, status, persona, errorOnly]);
+ }
+ 
+ export function ActivityFeed({
+@@ -57,20 +53,31 @@ export function ActivityFeed({
+   className,
+   listClassName,
+ }: Props) {
+-  const router = useRouter();
+-  const hydrated = useSim((s) => s.hydrated);
+-  const paused = useSim((s) => s.paused);
+-  const events = useSim((s) => s.events);
++  const start = useSessions((s) => s.start);
++  const connection = useSessions((s) => s.connection);
++  const logs = useSessions((s) => s.logs);
++  const agents = useSessions((s) => s.agents);
+   const reset = useActivityFilters((s) => s.reset);
+   const hasFilter = useActivityFilters(
+-    (s) => s.category !== "all" || s.agentId || s.platform || s.status,
++    (s) => s.status !== "all" || s.persona || s.errorOnly,
+   );
+ 
+-  const filtered = useFilteredEvents(events);
++  useEffect(() => start(), [start]);
++
++  const rows: LogRow[] = useMemo(
++    () =>
++      logs.map((l) => ({
++        ...l,
++        agent: l.persona
++          ? agents.find((a) => a.persona === l.persona)
++          : undefined,
++      })),
++    [logs, agents],
++  );
++
++  const filtered = useFilteredEvents(rows);
+ 
+   // --- Freeze logic: don't move rows under a user who is reading. --------
+-  // While a row is selected or the list is scrolled, new events are held back
+-  // and surfaced as a "N new events" affordance instead of shifting the list.
+   const scrollRef = useRef<HTMLDivElement>(null);
+   const [frozenTs, setFrozenTs] = useState<number | null>(null);
+   const [mountedAt] = useState(() => Date.now());
+@@ -121,10 +128,7 @@ export function ActivityFeed({
+     return () => window.removeEventListener("keydown", onKey);
+   }, [selectedId, select]);
+ 
+-  const onAgentClick = useCallback(
+-    (agentId: string) => router.push(`/agents?agent=${agentId}`),
+-    [router],
+-  );
++  const loading = connection === "connecting" && rows.length === 0;
+ 
+   return (
+     <div className={cn("@container flex min-h-0 flex-col", className)}>
+@@ -142,15 +146,8 @@ export function ActivityFeed({
+         )}
+       >
+         <span>Time</span>
+-        <span>Agent</span>
+-        {!compact && <span className="hidden @3xl:block">Action</span>}
+-        <span>
+-          <span className={cn(!compact && "@3xl:hidden")}>Action · </span>
+-          Context
+-        </span>
+-        <span className="justify-self-end">Score</span>
++        <span>Message</span>
+         <span>Status</span>
+-        <span />
+       </div>
+ 
+       <div
+@@ -182,13 +179,11 @@ export function ActivityFeed({
+           )}
+         </AnimatePresence>
+ 
+-        {!hydrated && (
++        {loading && (
+           <div className="space-y-px px-4 py-2">
+             {Array.from({ length: 10 }).map((_, i) => (
+               <div key={i} className="flex h-9 items-center gap-3">
+                 <Skeleton className="h-3 w-14" />
+-                <Skeleton className="h-3 w-20" />
+-                <Skeleton className="h-3 w-32" />
+                 <Skeleton className="h-3 flex-1" />
+                 <Skeleton className="h-3 w-16" />
+               </div>
+@@ -196,24 +191,22 @@ export function ActivityFeed({
+           </div>
+         )}
+ 
+-        {hydrated && paused && visible.length === 0 && (
+-          <EmptyState
+-            icon={Pause}
+-            title="Agents are paused"
+-            description="Resume agents to continue receiving activity."
+-          />
+-        )}
+-
+-        {hydrated && !paused && visible.length === 0 && (
++        {!loading && visible.length === 0 && (
+           <EmptyState
+             icon={Inbox}
+             title={
+-              hasFilter ? "No events match these filters" : "No activity yet"
++              hasFilter
++                ? "No events match these filters"
++                : connection === "offline"
++                  ? "Backend offline"
++                  : "No activity yet"
+             }
+             description={
+               hasFilter
+-                ? "Try widening the category or clearing the agent, platform and status filters."
+-                : "Agents will report here as soon as they start working."
++                ? "Try clearing the agent, status or error filters."
++                : connection === "offline"
++                  ? "Start the backend to see live logs here."
++                  : "Agents will report here as soon as they start working."
+             }
+             action={
+               hasFilter ? (
+@@ -226,21 +219,22 @@ export function ActivityFeed({
+         )}
+ 
+         <div className="divide-y divide-border/60">
+-          {visible.map((e) => {
+-            const isSelected = selectedId === e.id;
++          {visible.map((row) => {
++            const isSelected = selectedId === row.id;
+             return (
+-              <div key={e.id}>
++              <div key={row.id}>
+                 <ActivityRow
+-                  event={e}
++                  row={row}
+                   selected={isSelected}
+-                  isNew={e.ts > mountedAt}
++                  isNew={row.ts > mountedAt}
+                   compact={compact}
+                   highlighted={
+-                    !!highlightAgentId && e.agentId === highlightAgentId
++                    !!highlightAgentId && row.agent?.id === highlightAgentId
++                  }
++                  dimmed={
++                    !!highlightAgentId && row.agent?.id !== highlightAgentId
+                   }
+-                  dimmed={!!highlightAgentId && e.agentId !== highlightAgentId}
+                   onSelect={select}
+-                  onAgentClick={onAgentClick}
+                 />
+                 {mode === "inline" && (
+                   <AnimatePresence initial={false}>
+@@ -256,7 +250,7 @@ export function ActivityFeed({
+                         }}
+                         className="overflow-hidden bg-signal/[0.03]"
+                       >
+-                        <ActivityDetail event={e} layout="inline" />
++                        <ActivityDetail event={row} layout="inline" />
+                       </motion.div>
+                     )}
+                   </AnimatePresence>
+diff --git a/frontend/src/components/logs/activity-filters.tsx b/frontend/src/components/logs/activity-filters.tsx
+index 9a2ce14..865bef7 100644
+--- a/frontend/src/components/logs/activity-filters.tsx
++++ b/frontend/src/components/logs/activity-filters.tsx
+@@ -7,52 +7,29 @@ import {
+   DropdownMenuItem,
+   DropdownMenuTrigger,
+ } from "@/components/ui/dropdown-menu";
+-import { useActivityFilters, CATEGORY_FILTERS } from "@/lib/filters";
+-import { useSim } from "@/lib/store";
+-import type { EventStatus, Platform } from "@/lib/types";
+-import { eventStatusMeta } from "@/components/shared/event-status";
++import { useActivityFilters, STATUS_FILTERS } from "@/lib/filters";
++import { useSessions } from "@/lib/sessions/store";
+ import { cn } from "@/lib/utils";
+ 
+-const PLATFORMS: { value: Platform; label: string }[] = [
+-  { value: "reddit", label: "Reddit" },
+-  { value: "web", label: "Web" },
+-  { value: "system", label: "System" },
+-];
+-
+-const STATUSES: EventStatus[] = [
+-  "searching",
+-  "analyzing",
+-  "new",
+-  "complete",
+-  "allowed",
+-  "blocked",
+-  "rejected",
+-  "review",
+-  "updated",
+-  "detected",
+-  "paused",
+-  "error",
+-];
+-
+-/** Segmented category filter. Kept compact: text-only, single row. */
++/** Segmented status filter, backed by real `BrowserAgent.status`. */
+ export function CategorySegments({ className }: { className?: string }) {
+-  const category = useActivityFilters((s) => s.category);
+-  const setCategory = useActivityFilters((s) => s.setCategory);
++  const status = useActivityFilters((s) => s.status);
++  const setStatus = useActivityFilters((s) => s.setStatus);
+   return (
+     <div
+       className={cn("flex items-center gap-0.5", className)}
+       role="tablist"
+-      aria-label="Filter by category"
++      aria-label="Filter by status"
+     >
+-      {CATEGORY_FILTERS.map((f) => (
++      {STATUS_FILTERS.map((f) => (
+         <button
+           key={f.value}
+           role="tab"
+-          aria-selected={category === f.value}
+-          onClick={() => setCategory(f.value)}
++          aria-selected={status === f.value}
++          onClick={() => setStatus(f.value)}
+           className={cn(
+             "h-6 rounded px-2 text-xs transition-colors duration-150",
+-            category === f.value
++            status === f.value
+               ? "bg-accent text-foreground"
+               : "text-muted-foreground hover:text-foreground",
+           )}
+@@ -64,93 +41,65 @@ export function CategorySegments({ className }: { className?: string }) {
+   );
+ }
+ 
+-function FilterMenu<T extends string>({
+-  label,
+-  value,
+-  display,
+-  options,
+-  onChange,
+-}: {
+-  label: string;
+-  value: T | null;
+-  display?: string;
+-  options: { value: T; label: string }[];
+-  onChange: (v: T | null) => void;
+-}) {
++export function SecondaryFilters({ className }: { className?: string }) {
++  const agents = useSessions((s) => s.agents);
++  const f = useActivityFilters();
++  const personas = Array.from(new Set(agents.map((a) => a.persona)));
++
+   return (
+-    <div className="flex items-center">
+-      <DropdownMenu>
+-        <DropdownMenuTrigger asChild>
++    <div className={cn("flex items-center gap-1", className)}>
++      <div className="flex items-center">
++        <DropdownMenu>
++          <DropdownMenuTrigger asChild>
++            <button
++              className={cn(
++                "flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors",
++                f.persona
++                  ? "bg-accent text-foreground"
++                  : "text-muted-foreground hover:text-foreground",
++              )}
++            >
++              {f.persona ?? "Agent"}
++              <ChevronDown className="size-3 opacity-60" />
++            </button>
++          </DropdownMenuTrigger>
++          <DropdownMenuContent
++            align="end"
++            className="max-h-72 min-w-40 overflow-y-auto"
++          >
++            {personas.map((p) => (
++              <DropdownMenuItem
++                key={p}
++                onSelect={() => f.setPersona(p)}
++                className={cn("text-xs", f.persona === p && "bg-accent")}
++              >
++                {p}
++              </DropdownMenuItem>
++            ))}
++          </DropdownMenuContent>
++        </DropdownMenu>
++        {f.persona && (
+           <button
+-            className={cn(
+-              "flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors",
+-              value
+-                ? "bg-accent text-foreground"
+-                : "text-muted-foreground hover:text-foreground",
+-            )}
++            onClick={() => f.setPersona(null)}
++            className="-ml-0.5 rounded p-0.5 text-fg-subtle hover:text-foreground"
++            aria-label="Clear agent filter"
+           >
+-            {value ? (display ?? value) : label}
+-            <ChevronDown className="size-3 opacity-60" />
++            <X className="size-3" />
+           </button>
+-        </DropdownMenuTrigger>
+-        <DropdownMenuContent
+-          align="end"
+-          className="max-h-72 min-w-40 overflow-y-auto"
+-        >
+-          {options.map((o) => (
+-            <DropdownMenuItem
+-              key={o.value}
+-              onSelect={() => onChange(o.value)}
+-              className={cn("text-xs", value === o.value && "bg-accent")}
+-            >
+-              {o.label}
+-            </DropdownMenuItem>
+-          ))}
+-        </DropdownMenuContent>
+-      </DropdownMenu>
+-      {value && (
+-        <button
+-          onClick={() => onChange(null)}
+-          className="-ml-0.5 rounded p-0.5 text-fg-subtle hover:text-foreground"
+-          aria-label={`Clear ${label} filter`}
+-        >
+-          <X className="size-3" />
+-        </button>
+-      )}
+-    </div>
+-  );
+-}
++        )}
++      </div>
+ 
+-export function SecondaryFilters({ className }: { className?: string }) {
+-  const agents = useSim((s) => s.agents);
+-  const f = useActivityFilters();
+-  const agentName = agents.find((a) => a.id === f.agentId)?.name;
+-  return (
+-    <div className={cn("flex items-center gap-1", className)}>
+-      <FilterMenu
+-        label="Agent"
+-        value={f.agentId}
+-        display={agentName}
+-        options={agents.map((a) => ({ value: a.id, label: a.name }))}
+-        onChange={f.setAgent}
+-      />
+-      <FilterMenu
+-        label="Platform"
+-        value={f.platform}
+-        display={PLATFORMS.find((p) => p.value === f.platform)?.label}
+-        options={PLATFORMS}
+-        onChange={f.setPlatform}
+-      />
+-      <FilterMenu
+-        label="Status"
+-        value={f.status}
+-        display={f.status ? eventStatusMeta(f.status).label : undefined}
+-        options={STATUSES.map((s) => ({
+-          value: s,
+-          label: eventStatusMeta(s).label,
+-        }))}
+-        onChange={f.setStatus}
+-      />
++      <button
++        onClick={() => f.setErrorOnly(!f.errorOnly)}
++        className={cn(
++          "h-6 rounded px-2 text-xs transition-colors",
++          f.errorOnly
++            ? "bg-danger/15 text-danger"
++            : "text-muted-foreground hover:text-foreground",
++        )}
++      >
++        Errors only
++      </button>
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/logs/activity-row.tsx b/frontend/src/components/logs/activity-row.tsx
+index 983b5e2..79fef4c 100644
+--- a/frontend/src/components/logs/activity-row.tsx
++++ b/frontend/src/components/logs/activity-row.tsx
+@@ -2,48 +2,37 @@
+ 
+ import { memo } from "react";
+ import { motion } from "framer-motion";
+-import { Bot, ExternalLink } from "lucide-react";
+-import type { ActivityEvent } from "@/lib/types";
++import type { LogRow } from "./types";
+ import { clock } from "@/lib/format";
+ import { AgentName } from "@/components/shared/agent-name";
+-import { EventStatusBadge } from "@/components/shared/event-status";
+-import { Score } from "@/components/shared/score";
+-import {
+-  Tooltip,
+-  TooltipContent,
+-  TooltipTrigger,
+-} from "@/components/ui/tooltip";
++import { AgentStatusBadge } from "@/components/shared/agent-status";
+ import { cn } from "@/lib/utils";
+ 
+ /**
+- * Column template. Below the `@3xl` container width the Action column folds
+- * into Context so the feed stays readable in narrow panels.
++ * Column template. Below the `@3xl` container width the Agent column folds
++ * into the message so the feed stays readable in narrow panels.
+  */
+-export const ROW_GRID =
+-  "grid-cols-[64px_92px_minmax(0,1fr)_44px_92px_44px] @3xl:grid-cols-[64px_96px_150px_minmax(0,1fr)_48px_96px_44px]";
+-export const ROW_GRID_COMPACT =
+-  "grid-cols-[64px_92px_minmax(0,1fr)_44px_92px_44px]";
++export const ROW_GRID = "grid-cols-[64px_minmax(0,1fr)_96px]";
++export const ROW_GRID_COMPACT = "grid-cols-[64px_minmax(0,1fr)_96px]";
+ 
+ interface Props {
+-  event: ActivityEvent;
++  row: LogRow;
+   selected: boolean;
+   isNew: boolean;
+   compact?: boolean;
+   highlighted?: boolean;
+   dimmed?: boolean;
+   onSelect: (id: string) => void;
+-  onAgentClick?: (agentId: string) => void;
+ }
+ 
+ function ActivityRowInner({
+-  event,
++  row,
+   selected,
+   isNew,
+   compact,
+   highlighted,
+   dimmed,
+   onSelect,
+-  onAgentClick,
+ }: Props) {
+   return (
+     <motion.div
+@@ -54,11 +43,11 @@ function ActivityRowInner({
+       role="button"
+       tabIndex={0}
+       aria-expanded={selected}
+-      onClick={() => onSelect(event.id)}
++      onClick={() => onSelect(row.id)}
+       onKeyDown={(e) => {
+         if (e.key === "Enter" || e.key === " ") {
+           e.preventDefault();
+-          onSelect(event.id);
++          onSelect(row.id);
+         }
+       }}
+       className={cn(
+@@ -70,6 +59,7 @@ function ActivityRowInner({
+         isNew && !selected && "animate-row-flash",
+         highlighted && !selected && "bg-foreground/[0.04]",
+         dimmed && "opacity-40",
++        row.error && !selected && "text-danger",
+       )}
+     >
+       {selected && (
+@@ -78,69 +68,25 @@ function ActivityRowInner({
+           aria-hidden
+         />
+       )}
+-      <span className="font-mono text-fg-subtle tnum">{clock(event.ts)}</span>
+-      <button
+-        onClick={(e) => {
+-          if (!onAgentClick) return;
+-          e.stopPropagation();
+-          onAgentClick(event.agentId);
+-        }}
+-        className="truncate text-left hover:underline hover:decoration-border-strong hover:underline-offset-2"
+-      >
+-        <AgentName id={event.agentId} />
+-      </button>
+-      {!compact && (
+-        <span className="hidden truncate text-foreground @3xl:block">
+-          {event.action}
+-        </span>
+-      )}
+-      <span className="truncate text-muted-foreground">
+-        <span className={cn("text-foreground", !compact && "@3xl:hidden")}>
+-          {event.action} ·{" "}
+-        </span>
+-        {event.context}
+-      </span>
+-      <span className="justify-self-end">
+-        {event.score !== undefined ? (
+-          <Score value={event.score} bar={false} />
+-        ) : (
+-          <span className="text-fg-subtle">—</span>
+-        )}
+-      </span>
+-      <EventStatusBadge status={event.status} animateCheck={isNew} />
+-      <span className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+-        {event.platform === "reddit" && (
+-          <Tooltip>
+-            <TooltipTrigger asChild>
+-              <button
+-                className="rounded p-1 text-fg-subtle hover:bg-foreground/[0.06] hover:text-foreground"
+-                onClick={(e) => e.stopPropagation()}
+-                aria-label="Open discussion"
+-              >
+-                <ExternalLink className="size-3" />
+-              </button>
+-            </TooltipTrigger>
+-            <TooltipContent>Open discussion</TooltipContent>
+-          </Tooltip>
+-        )}
+-        {onAgentClick && (
+-          <Tooltip>
+-            <TooltipTrigger asChild>
+-              <button
+-                className="rounded p-1 text-fg-subtle hover:bg-foreground/[0.06] hover:text-foreground"
+-                onClick={(e) => {
+-                  e.stopPropagation();
+-                  onAgentClick(event.agentId);
+-                }}
+-                aria-label="View agent"
+-              >
+-                <Bot className="size-3" />
+-              </button>
+-            </TooltipTrigger>
+-            <TooltipContent>View agent</TooltipContent>
+-          </Tooltip>
++      <span className="font-mono text-fg-subtle tnum">{clock(row.ts)}</span>
++      <span className="truncate">
++        {row.persona && (
++          <span className="mr-1.5">
++            <AgentName id={row.persona} name={row.persona} />
++            {row.level !== undefined && (
++              <span className="ml-1 text-fg-subtle">L{row.level}</span>
++            )}
++          </span>
+         )}
++        <span className={cn(row.error ? "text-danger" : "text-muted-foreground")}>
++          {row.msg}
++        </span>
+       </span>
++      {row.agent ? (
++        <AgentStatusBadge status={row.agent.status} dotOnly={compact} />
++      ) : (
++        <span className="justify-self-start text-fg-subtle">—</span>
++      )}
+     </motion.div>
+   );
+ }
+diff --git a/frontend/src/components/shared/agent-name.tsx b/frontend/src/components/shared/agent-name.tsx
+index 4ce6660..f4ce350 100644
+--- a/frontend/src/components/shared/agent-name.tsx
++++ b/frontend/src/components/shared/agent-name.tsx
+@@ -3,18 +3,24 @@
+ import { useSim } from "@/lib/store";
+ import { cn } from "@/lib/utils";
+ 
+-/** Monospace agent identifier. Resolves id → display name; falls back to the raw label. */
++/**
++ * Monospace agent identifier. Resolves id → display name; falls back to the
++ * raw label. Pass `name` directly to bypass the mock `useSim` lookup (used by
++ * the Logs page, which resolves names from real backend data instead).
++ */
+ export function AgentName({
+   id,
++  name,
+   className,
+ }: {
+   id: string;
++  name?: string;
+   className?: string;
+ }) {
+-  const name = useSim((s) => s.agents.find((a) => a.id === id)?.name);
++  const simName = useSim((s) => s.agents.find((a) => a.id === id)?.name);
+   return (
+     <span className={cn("font-mono text-xs text-foreground", className)}>
+-      {name ?? id}
++      {name ?? simName ?? id}
+     </span>
+   );
+ }
+diff --git a/frontend/src/components/shared/agent-status.tsx b/frontend/src/components/shared/agent-status.tsx
+index 0cee4f3..b27bbd0 100644
+--- a/frontend/src/components/shared/agent-status.tsx
++++ b/frontend/src/components/shared/agent-status.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { AnimatePresence, motion } from "framer-motion";
+ import type { AgentStatus } from "@/lib/types";
++import type { SessionStatus } from "@/lib/sessions/types";
+ import { STATUS_LABEL } from "@/lib/mock/agents";
+ import { StatusDot, TONE_TEXT, type Tone } from "./status-dot";
+ import { useSim } from "@/lib/store";
+@@ -20,8 +21,37 @@ export const AGENT_STATUS_TONE: Record<AgentStatus, Tone> = {
+ 
+ const ACTIVE: AgentStatus[] = ["searching", "analyzing", "writing"];
+ 
++/** Real backend session status (`BrowserAgent["status"]`), a separate enum from the mock's `AgentStatus`. */
++export const SESSION_STATUS_TONE: Record<SessionStatus, Tone> = {
++  queued: "muted",
++  running: "signal",
++  done: "success",
++  failed: "danger",
++  stopped: "muted",
++};
++
++const SESSION_STATUS_LABEL: Record<SessionStatus, string> = {
++  queued: "Queued",
++  running: "Running",
++  done: "Done",
++  failed: "Failed",
++  stopped: "Stopped",
++};
++
++const SESSION_STATUSES: SessionStatus[] = [
++  "queued",
++  "running",
++  "done",
++  "failed",
++  "stopped",
++];
++
++function isSessionStatus(s: AgentStatus | SessionStatus): s is SessionStatus {
++  return (SESSION_STATUSES as string[]).includes(s);
++}
++
+ interface Props {
+-  status: AgentStatus;
++  status: AgentStatus | SessionStatus;
+   className?: string;
+   /** Hide the label, show only the dot. */
+   dotOnly?: boolean;
+@@ -34,6 +64,23 @@ export function AgentStatusBadge({
+   dotOnly,
+ }: Props) {
+   const globalPause = useSim((s) => s.paused);
++
++  if (isSessionStatus(rawStatus)) {
++    const tone = SESSION_STATUS_TONE[rawStatus];
++    return (
++      <span
++        className={cn("inline-flex items-center gap-1.5 text-xs", className)}
++      >
++        <StatusDot tone={tone} pulse={rawStatus === "running"} />
++        {!dotOnly && (
++          <span className={TONE_TEXT[tone]}>
++            {SESSION_STATUS_LABEL[rawStatus]}
++          </span>
++        )}
++      </span>
++    );
++  }
++
+   const status: AgentStatus =
+     globalPause && rawStatus !== "error" ? "paused" : rawStatus;
+   const tone = AGENT_STATUS_TONE[status];
+diff --git a/frontend/src/components/shared/live-indicator.tsx b/frontend/src/components/shared/live-indicator.tsx
+index b381a79..3455a6d 100644
+--- a/frontend/src/components/shared/live-indicator.tsx
++++ b/frontend/src/components/shared/live-indicator.tsx
+@@ -1,13 +1,39 @@
+ "use client";
+ 
+ import { useSim } from "@/lib/store";
++import type { SessionConnection } from "@/lib/sessions/store";
++import type { ConnectionState } from "@/lib/types";
+ import { StatusDot } from "./status-dot";
+ import { cn } from "@/lib/utils";
+ 
+-export function LiveIndicator({ className }: { className?: string }) {
+-  const paused = useSim((s) => s.paused);
+-  const connection = useSim((s) => s.connection);
++interface Props {
++  className?: string;
++  /**
++   * Pass the real `useSessions` connection state to drive this from the
++   * backend (used by the Logs page) instead of the mock `useSim` store.
++   */
++  connection?: SessionConnection | ConnectionState;
++}
++
++export function LiveIndicator({ className, connection: connectionProp }: Props) {
++  const simPaused = useSim((s) => s.paused);
++  const simConnection = useSim((s) => s.connection);
++  const connection = connectionProp ?? simConnection;
++  const paused = connectionProp === undefined && simPaused;
+ 
++  if (connection === "connecting") {
++    return (
++      <span
++        className={cn(
++          "inline-flex items-center gap-1.5 text-xs text-warning",
++          className,
++        )}
++      >
++        <StatusDot tone="warning" pulse size="xs" />
++        Connecting
++      </span>
++    );
++  }
+   if (connection === "reconnecting") {
+     return (
+       <span
+diff --git a/frontend/src/lib/filters.ts b/frontend/src/lib/filters.ts
+index e841ea9..917ce1b 100644
+--- a/frontend/src/lib/filters.ts
++++ b/frontend/src/lib/filters.ts
+@@ -2,55 +2,37 @@
+ 
+ import { create } from "zustand";
+ import { persist } from "zustand/middleware";
+-import type { EventCategory, EventStatus, Platform } from "@/lib/types";
++import type { SessionStatus } from "@/lib/sessions/types";
+ 
+-export type CategoryFilter =
+-  "all" | Exclude<EventCategory, "strategy" | "system">;
+-
+-export const CATEGORY_FILTERS: {
+-  value: CategoryFilter;
+-  label: string;
+-  match: EventCategory[];
+-}[] = [
+-  { value: "all", label: "All", match: [] },
+-  { value: "discovery", label: "Discovery", match: ["discovery"] },
+-  { value: "analysis", label: "Analysis", match: ["analysis"] },
+-  { value: "writing", label: "Writing", match: ["writing"] },
+-  { value: "policy", label: "Policy", match: ["policy"] },
+-  { value: "monitoring", label: "Monitoring", match: ["monitoring"] },
+-  {
+-    value: "visibility",
+-    label: "Visibility",
+-    match: ["visibility", "strategy"],
+-  },
+-  { value: "error", label: "Errors", match: ["error"] },
++export const STATUS_FILTERS: { value: SessionStatus | "all"; label: string }[] = [
++  { value: "all", label: "All" },
++  { value: "queued", label: "Queued" },
++  { value: "running", label: "Running" },
++  { value: "done", label: "Done" },
++  { value: "failed", label: "Failed" },
++  { value: "stopped", label: "Stopped" },
+ ];
+ 
+ interface FilterState {
+-  category: CategoryFilter;
+-  agentId: string | null;
+-  platform: Platform | null;
+-  status: EventStatus | null;
+-  setCategory: (c: CategoryFilter) => void;
+-  setAgent: (id: string | null) => void;
+-  setPlatform: (p: Platform | null) => void;
+-  setStatus: (s: EventStatus | null) => void;
++  status: SessionStatus | "all";
++  persona: string | null;
++  errorOnly: boolean;
++  setStatus: (s: SessionStatus | "all") => void;
++  setPersona: (p: string | null) => void;
++  setErrorOnly: (v: boolean) => void;
+   reset: () => void;
+ }
+ 
+ export const useActivityFilters = create<FilterState>()(
+   persist(
+     (set) => ({
+-      category: "all",
+-      agentId: null,
+-      platform: null,
+-      status: null,
+-      setCategory: (category) => set({ category }),
+-      setAgent: (agentId) => set({ agentId }),
+-      setPlatform: (platform) => set({ platform }),
++      status: "all",
++      persona: null,
++      errorOnly: false,
+       setStatus: (status) => set({ status }),
+-      reset: () =>
+-        set({ category: "all", agentId: null, platform: null, status: null }),
++      setPersona: (persona) => set({ persona }),
++      setErrorOnly: (errorOnly) => set({ errorOnly }),
++      reset: () => set({ status: "all", persona: null, errorOnly: false }),
+     }),
+     { name: "inception.activity-filters" },
+   ),

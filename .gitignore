@@ -5,6 +5,9 @@ __pycache__/
 .dist/
 backend/agent_states/
 backend/orchestrator_runs/
+orchestrator_logs/*
+!orchestrator_logs/.gitkeep
 scripts/yusuf-login.png
 scripts/yusuf-profile.png
 .pytest_cache/
+scripts/reddit-check/

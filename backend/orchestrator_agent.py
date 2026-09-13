@@ -1,8 +1,7 @@
 """Model-backed coordinator for assigning social-demo work to dreamers.
 
-This module plans work and records adapter callbacks. It deliberately contains
-no Reddit automation: another component may execute assignments only against a
-mock community or a private, consented environment.
+This module plans structured commands and records adapter callbacks. The CLI
+executor runs them against a mock community or the configured Reddit community.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from . import agent_state_store, config, events, personas
+from . import agent_state_store, config, events, orchestrator_log, personas
 
 ALLOWED_ACTIONS = {"create_post", "comment", "wait"}
 ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
@@ -34,11 +33,13 @@ _PLAN_SCHEMA = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["persona", "action", "instructions", "target_url", "wait_for"],
+                "required": ["persona", "action", "instructions", "target_url", "wait_for", "title", "body"],
                 "properties": {
                     "persona": {"type": "string"},
                     "action": {"type": "string", "enum": sorted(ALLOWED_ACTIONS)},
                     "instructions": {"type": "string"},
+                    "title": {"type": ["string", "null"]},
+                    "body": {"type": ["string", "null"]},
                     "target_url": {"type": ["string", "null"]},
                     "wait_for": {"type": "array", "items": {"type": "string"}},
                 },
@@ -47,20 +48,23 @@ _PLAN_SCHEMA = {
     },
 }
 
-_SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for a staged social-media demo.
-Read and obey the supplied repository instructions. Assign the smallest useful next step to
-each selected synthetic persona. The only actions are create_post, comment, and wait.
+_SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for Reddit content.
+Read and obey the supplied orchestrator instructions. Assign the smallest useful next step to
+each selected persona. The only actions are create_post, comment, and wait.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
 Do not assign duplicate work that is already completed or in progress. Keep persona voices
-distinct, but do not write final post/comment copy; give concise execution instructions.
+distinct. Supply final title and body for create_post, body for comment, and null
+title/body for wait. Instructions summarize the command. Comments are top-level replies
+only. Use an observed post
+URL as target_url, or null with exactly one create_post task ID in wait_for whose
+completed URL the executor will use. Only r/HackathonsCanada is supported in private
+runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must reference
+tasks from previous phases. Never issue shell commands.
 
-This planner may operate only in a mock environment or a private environment whose
-participants consented. All content must be labeled synthetic. Never plan public coordinated
-posting, platform-control evasion, spam, or manufactured consensus. If the request conflicts
-with that boundary, assign a wait task explaining what operator confirmation or environment
-change is required.
+Never plan platform-control evasion or spam. If the request conflicts with that boundary,
+assign a wait task explaining the blocker.
 """
 
 
@@ -125,9 +129,15 @@ class OpenAIResponsesPlanner:
 class CampaignOrchestrator:
     """Creates runs, advances phases, and owns the durable coordination audit."""
 
-    def __init__(self, planner: Planner | None = None, runs_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        planner: Planner | None = None,
+        runs_dir: Path | None = None,
+        logs_dir: Path | None = None,
+    ) -> None:
         self.planner = planner or OpenAIResponsesPlanner()
         self.runs_dir = runs_dir or config.ORCHESTRATOR_RUNS_DIR
+        self.logs_dir = logs_dir or config.ORCHESTRATOR_LOGS_DIR
         self._lock = asyncio.Lock()
 
     async def start(
@@ -196,9 +206,14 @@ class CampaignOrchestrator:
             run = self._load(run_id)
             if persona not in run["personas"]:
                 raise ValueError(f"persona {persona!r} is not part of run {run_id}")
-            known_tasks = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
+            known_tasks = {task["id"]: task for phase in run["phases"] for task in phase["assignments"]}
             if task_id not in known_tasks:
                 raise ValueError(f"unknown task_id {task_id!r}")
+            task = known_tasks[task_id]
+            if task["persona"] != persona:
+                raise ValueError("activity persona does not own the task")
+            if kind != {"create_post": "post", "comment": "comment", "wait": "wait"}[task["action"]] and kind != "system":
+                raise ValueError("activity kind does not match the task")
             activity = {
                 "id": uuid.uuid4().hex[:12],
                 "run_id": run_id,
@@ -209,16 +224,24 @@ class CampaignOrchestrator:
                 "url": url,
                 "parent_url": parent_url,
                 "note": note,
+                "reddit_username": reddit_username,
                 "timestamp": _timestamp(),
             }
             agent_state_store.append_activity(
-                persona, activity, reddit_username=reddit_username
+                persona, activity,
+                reddit_username=reddit_username if run["environment"] == "private" else None,
             )
             run["events"].append({"type": "agent_activity", "persona": persona, **activity})
             run["updated_at"] = _timestamp()
             run["status"] = "planning" if continue_after else "active"
             self._save(run)
             events.publish("log", msg=f"{persona} reported {kind} {status} for {task_id}")
+            orchestrator_log.append(
+                run_id,
+                "output",
+                {"source": "activity_callback", "activity": activity},
+                logs_dir=self.logs_dir,
+            )
 
         return await self._advance(run) if continue_after else run
 
@@ -230,13 +253,33 @@ class CampaignOrchestrator:
         try:
             proposal = await self.planner.plan(context)
             assignments = self._validate_plan(proposal, run)
-        except Exception:
+        except Exception as exc:
             async with self._lock:
                 latest = self._load(run["id"])
                 latest["status"] = "failed"
                 latest["updated_at"] = _timestamp()
                 self._save(latest)
+                orchestrator_log.append(
+                    run["id"],
+                    "output",
+                    {"source": "planner", "error": f"{type(exc).__name__}: {exc}"},
+                    logs_dir=self.logs_dir,
+                )
             raise
+
+        orchestrator_log.append(
+            run["id"],
+            "thinking",
+            {
+                "phase": len(run["phases"]) + 1,
+                "summary": proposal["summary"],
+                "model": run["model"],
+                "reasoning_effort": run["reasoning_effort"],
+                "context": context,
+                "note": "The Responses API exposes the plan summary, not private chain-of-thought.",
+            },
+            logs_dir=self.logs_dir,
+        )
 
         async with self._lock:
             latest = self._load(run["id"])
@@ -269,15 +312,25 @@ class CampaignOrchestrator:
             self._save(latest)
             for task in persisted:
                 events.publish("orchestrator", run_id=latest["id"], assignment=task)
+            orchestrator_log.append(
+                latest["id"],
+                "action",
+                {"phase": phase_number, "assignments": persisted},
+                logs_dir=self.logs_dir,
+            )
             return latest
 
     def _context(self, run: dict[str, Any]) -> dict[str, Any]:
         try:
-            repository_instructions = config.AGENTS_INSTRUCTIONS_PATH.read_text(encoding="utf-8")
+            orchestrator_instructions = config.ORCHESTRATOR_INSTRUCTIONS_PATH.read_text(
+                encoding="utf-8"
+            )
         except OSError as exc:
-            raise OrchestratorConfigurationError(f"could not read agents.md: {exc}") from exc
+            raise OrchestratorConfigurationError(
+                f"could not read ORCHESTRATOR.md: {exc}"
+            ) from exc
         return {
-            "repository_instructions": repository_instructions,
+            "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
             "environment": run["environment"],
             "run_id": run["id"],
@@ -302,6 +355,12 @@ class CampaignOrchestrator:
             wait_for = item.get("wait_for")
             if not isinstance(wait_for, list) or not all(isinstance(value, str) for value in wait_for):
                 raise OrchestratorModelError("wait_for must be a list of task IDs")
+            known_ids = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
+            if any(task_id not in known_ids for task_id in wait_for):
+                raise OrchestratorModelError("wait_for references an unknown task")
+            for field in ("title", "body", "target_url"):
+                if item.get(field) is not None and not isinstance(item[field], str):
+                    raise OrchestratorModelError(f"{field} must be a string or null")
             assignments.append(
                 {
                     "persona": item["persona"],
@@ -309,6 +368,8 @@ class CampaignOrchestrator:
                     "instructions": item["instructions"].strip(),
                     "target_url": item.get("target_url"),
                     "wait_for": wait_for,
+                    "title": item.get("title"),
+                    "body": item.get("body"),
                 }
             )
         return assignments
