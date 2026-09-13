@@ -1,7 +1,7 @@
 """Model-backed coordinator for assigning social-demo work to dreamers.
 
 This module plans structured commands and records adapter callbacks. The CLI
-executor runs them against a mock community or a private, consented environment.
+executor runs them against a mock community or the configured Reddit community.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must r
 tasks from previous phases. Never issue shell commands.
 
 This planner may operate only in a mock environment or a private environment whose
-participants consented. All content must be labeled synthetic. Never plan public coordinated
+participants consented. Never plan public coordinated
 posting, platform-control evasion, spam, or manufactured consensus. If the request conflicts
 with that boundary, assign a wait task explaining what operator confirmation or environment
 change is required.

@@ -24,7 +24,7 @@ campaign coordinator. The coordinator reads this file and the durable agent
 ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone
 Reddit author adapter supports disclosed test posts and top-level comments in
 r/HackathonsCanada through a logged-in Steel browser. The CLI executor now connects structured
-campaign assignments to this adapter for private, consented runs, with a local
+campaign assignments to this adapter for configured Reddit runs, with a local
 mock executor for testing. AI Overview evaluation is not implemented.
 Keep that distinction explicit when changing this document or
 presenting the project.
@@ -225,13 +225,12 @@ needed for planning, including mock mode):
 ```powershell
 uv run python scripts/reddit_publish.py orchestrate --prompt "Create a disclosed synthetic kickoff, then a reply" --personas Cobb Arthur --phases 2
 uv run python scripts/reddit_publish.py orchestrate --run-id RUN_ID
-uv run python scripts/reddit_publish.py orchestrate --prompt "Run our consented private demo" --personas Cobb Arthur --environment private --private-consented --phases 2
+uv run python scripts/reddit_publish.py orchestrate --prompt "Run our Reddit demo" --personas Cobb Arthur --environment private --phases 2
 ```
 
 Mock is the default: it records synthetic URLs and activity without opening Steel
-or changing saved Reddit identities. Private execution requires the operator's
-consent attestation and verifies that r/HackathonsCanada is actually private before
-publishing. Commands contain final `title`/`body` fields; the author appends the
+or changing saved Reddit identities. Commands contain final `title`/`body` fields;
+the author appends the
 existing automated disclosure. Legacy prose-only assignments fail without posting.
 
 Execution is serial and bounded by `--phases` (default 1). Each batch executes
@@ -241,6 +240,8 @@ or blocked batches stop. A comment can take its target from exactly one complete
 post dependency in `wait_for`; dependencies must reference earlier phases.
 Completed tasks are skipped on resume. To plan further work after a completed run,
 call the existing `/continue` endpoint before executing its pending assignments.
+The CLI ends with a concise summary of completed, failed, and pending assignments;
+the full durable run remains available in the run audit and orchestration endpoint.
 
 Task IDs are publishing request IDs. Failed or interrupted tasks block resumed
 execution. Inspect/reconcile the existing Reddit receipt with the standalone CLI,

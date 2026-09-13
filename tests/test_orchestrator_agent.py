@@ -114,6 +114,16 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 status="completed",
             )
 
+    async def test_private_environment_is_sent_to_planner(self):
+        run = await self.orchestrator.start(
+            "Private demo",
+            selected_personas=["Cobb"],
+            environment="private",
+        )
+
+        self.assertEqual(run["environment"], "private")
+        self.assertEqual(self.planner.contexts[-1]["environment"], "private")
+
 
 class ResponseParsingTests(unittest.TestCase):
     def test_extracts_responses_api_output_text(self):

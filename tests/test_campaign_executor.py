@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from backend import config, agent_state_store
-from backend.campaign_executor import CampaignExecutor, execution_lock
+from backend.campaign_executor import CampaignExecutor, execution_lock, execution_summary
 from backend.orchestrator_agent import CampaignOrchestrator
 
 
@@ -64,25 +64,23 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_private_commands_use_task_id_and_report_identity(self):
         run = await self.start("private")
-        with self.assertRaisesRegex(ValueError, "private-consented"):
-            await self.executor.execute(run["id"])
-        result = await self.executor.execute(run["id"], private_consented=True)
+        result = await self.executor.execute(run["id"])
         command = self.publisher.call_args.args[0]
         self.assertEqual(command.request_id, run["phases"][0]["assignments"][0]["id"])
         self.assertEqual(command.action, "post")
-        self.assertTrue(self.publisher.call_args.kwargs["require_private"])
+        self.assertEqual(self.publisher.call_args.kwargs, {})
         self.assertEqual(result["events"][-1]["status"], "completed")
-        await self.executor.execute(run["id"], private_consented=True)
+        await self.executor.execute(run["id"])
         self.publisher.assert_awaited_once()
 
     async def test_failure_stops_replanning_and_blocks_resume(self):
         self.publisher.side_effect = TimeoutError("Uncertain submission")
         run = await self.start("private")
-        result = await self.executor.execute(run["id"], phases=3, private_consented=True)
+        result = await self.executor.execute(run["id"], phases=3)
         self.assertEqual(len(result["phases"]), 1)
         self.assertEqual(result["events"][-1]["status"], "failed")
         with self.assertRaisesRegex(RuntimeError, "reconcile"):
-            await self.executor.execute(run["id"], private_consented=True)
+            await self.executor.execute(run["id"])
         self.publisher.assert_awaited_once()
 
     async def test_interrupted_task_blocks_execution(self):
@@ -127,6 +125,18 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
                 run["id"], persona="Arthur", task_id=run["phases"][0]["assignments"][0]["id"],
                 kind="post", status="started", continue_after=False,
             )
+
+    async def test_execution_summary_reports_actions_without_dumping_run(self):
+        run = await self.start("private")
+        result = await self.executor.execute(run["id"])
+
+        output = execution_summary(result)
+
+        self.assertIn(f"Orchestration {run['id']}", output)
+        self.assertIn("Outcome: 1 completed, 0 failed, 0 pending", output)
+        self.assertIn("[OK] Cobb created post", output)
+        self.assertIn("https://www.reddit.com/r/HackathonsCanada/comments/abc/test/", output)
+        self.assertNotIn('"schema_version"', output)
 
 
 if __name__ == "__main__":

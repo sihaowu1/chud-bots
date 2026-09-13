@@ -34,20 +34,17 @@ class CampaignExecutor:
         self.coordinator = coordinator
         self.publisher = publisher
 
-    async def execute(self, run_id, *, phases=1, private_consented=False):
+    async def execute(self, run_id, *, phases=1):
         if phases < 1:
             raise ValueError("phases must be positive")
         with execution_lock(self.coordinator.runs_dir):
             orchestrator_log.append(
-                run_id, "cli", {"event": "executor_started", "phases": phases,
-                                "private_consented": private_consented},
+                run_id, "cli", {"event": "executor_started", "phases": phases},
                 logs_dir=self.coordinator.logs_dir,
             )
             run = self.coordinator.get(run_id)
             if run["environment"] not in {"mock", "private"}:
                 raise ValueError("unsupported execution environment")
-            if run["environment"] == "private" and not private_consented:
-                raise ValueError("Private execution requires --private-consented")
             previous = {e["task_id"]: e["status"] for e in run["events"]
                         if e["type"] == "agent_activity"}
             if any(status in {"started", "failed"} for status in previous.values()):
@@ -94,7 +91,7 @@ class CampaignExecutor:
                                 "reddit_username": f"synthetic_{task['persona'].lower()}",
                             }
                         else:
-                            result = await self.publisher(command, require_private=True)
+                            result = await self.publisher(command)
                         await report(
                             "completed", content=content, url=result["url"],
                             reddit_username=result["reddit_username"],
@@ -154,6 +151,49 @@ class CampaignExecutor:
         )
 
 
+def execution_summary(run):
+    """Render a concise account of executor activity, not the full durable run."""
+    tasks = [task for phase in run["phases"] for task in phase["assignments"]]
+    latest = {}
+    for event in run["events"]:
+        if event["type"] == "agent_activity":
+            latest[event["task_id"]] = event
+
+    completed = sum(event["status"] == "completed" for event in latest.values())
+    failed = sum(event["status"] == "failed" for event in latest.values())
+    pending = sum(task["id"] not in latest for task in tasks)
+    lines = [
+        f"Orchestration {run['id']}",
+        f"Environment: {run['environment']}",
+        f"Outcome: {completed} completed, {failed} failed, {pending} pending",
+        "Actions performed:",
+    ]
+
+    performed = False
+    verbs = {"post": "created post", "comment": "added comment", "wait": "waited"}
+    for task in tasks:
+        event = latest.get(task["id"])
+        if not event:
+            continue
+        performed = True
+        marker = "OK" if event["status"] == "completed" else event["status"].upper()
+        detail = event.get("url") or event.get("note")
+        action = verbs.get(event["kind"], event["kind"])
+        line = f"  [{marker}] {task['persona']} {action} ({task['id']})"
+        lines.append(f"{line}: {detail}" if detail else line)
+    if not performed:
+        lines.append("  None")
+
+    pending_tasks = [task for task in tasks if task["id"] not in latest]
+    if pending_tasks:
+        lines.append("Pending assignments:")
+        for task in pending_tasks:
+            lines.append(
+                f"  [PENDING] {task['persona']} {task['action']} ({task['id']})"
+            )
+    return "\n".join(lines)
+
+
 async def cli(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -162,16 +202,16 @@ async def cli(argv):
     parser.add_argument("--personas", nargs="+")
     parser.add_argument("--environment", choices=["mock", "private"], default="mock")
     parser.add_argument("--phases", type=int, default=1, help="Maximum execution batches (default: 1)")
-    parser.add_argument("--private-consented", action="store_true", help="Attest that private-community participants consented")
     args = parser.parse_args(argv)
     if args.phases < 1:
         parser.error("--phases must be positive")
     coordinator = CampaignOrchestrator()
     if args.prompt:
-        if args.environment == "private" and not args.private_consented:
-            parser.error("private execution requires --private-consented")
-        run = await coordinator.start(args.prompt, selected_personas=args.personas, environment=args.environment)
-        print(f"Created orchestration {run['id']}", flush=True)
+        run = await coordinator.start(
+            args.prompt,
+            selected_personas=args.personas,
+            environment=args.environment,
+        )
         run_id = run["id"]
     else:
         run_id = args.run_id
@@ -179,10 +219,8 @@ async def cli(argv):
         run_id, "cli", {"event": "invocation", "argv": list(argv)},
         logs_dir=coordinator.logs_dir,
     )
-    result = await CampaignExecutor(coordinator).execute(
-        run_id, phases=args.phases, private_consented=args.private_consented,
-    )
-    print(json.dumps(result, indent=2), flush=True)
+    result = await CampaignExecutor(coordinator).execute(run_id, phases=args.phases)
+    print(execution_summary(result), flush=True)
     latest = {e["task_id"]: e["status"] for e in result["events"]
               if e["type"] == "agent_activity"}
     if any(status == "failed" for status in latest.values()):

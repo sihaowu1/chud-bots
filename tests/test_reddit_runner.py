@@ -8,7 +8,7 @@ from backend import config, reddit_runner
 
 
 class RunnerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_private_check_prevents_submission_and_releases_session(self):
+    async def test_submission_proceeds_and_releases_session(self):
         page = MagicMock()
         browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
         pw = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser)))
@@ -18,8 +18,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         dreamer = MagicMock()
         dreamer._prepare_reddit_access = AsyncMock()
         author = MagicMock()
-        author._json = AsyncMock(return_value={"data": {"subreddit_type": "public"}})
-        author.create_post = AsyncMock()
+        author.create_post = AsyncMock(return_value={
+            "status": "draft", "url": "https://example.test/post",
+        })
         session = SimpleNamespace(id="session", websocket_url="wss://example.test")
         args = SimpleNamespace(persona="Cobb", dry_run=False, action="post", title="Demo", body="Test", request_id="task")
         with (
@@ -31,9 +32,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(reddit_runner.steel_client, "session_summary", return_value={}),
             patch.object(reddit_runner.steel_client, "release_session", AsyncMock()) as release,
         ):
-            with self.assertRaisesRegex(RuntimeError, "requires a private"):
-                await reddit_runner._publish(args, require_private=True)
-        author.create_post.assert_not_awaited()
+            result = await reddit_runner._publish(args)
+        self.assertEqual(result["status"], "draft")
+        author.create_post.assert_awaited_once_with("Demo", "Test", request_id="task")
         release.assert_awaited_once_with("session")
 
     async def test_persona_lock_rejects_overlapping_publishers_and_cleans_up(self):

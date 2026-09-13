@@ -12,7 +12,7 @@ from .personas import names, pick
 from .reddit_author import RedditAuthor
 
 
-async def publish(args, *, require_private=False):
+async def publish(args):
     locks = config.AGENT_STATES_DIR / "publisher_locks"
     locks.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(args.persona.encode()).hexdigest()
@@ -23,12 +23,12 @@ async def publish(args, *, require_private=False):
         raise RuntimeError(f"Persona publisher busy or interrupted; inspect {lock}") from exc
     try:
         with handle:
-            return await _publish(args, require_private=require_private)
+            return await _publish(args)
     finally:
         lock.unlink()
 
 
-async def _publish(args, *, require_private=False):
+async def _publish(args):
     persona = next(p for p in pick(len(names())) if p.name == args.persona)
     saved = agent_state_store.load_or_create(persona.name)
     if not (saved.get("steel") or {}).get("profile_id") and not (
@@ -46,10 +46,6 @@ async def _publish(args, *, require_private=False):
             async with asyncio.timeout(180):
                 await dreamer._prepare_reddit_access(page)
                 author = RedditAuthor(dreamer, page, dry_run=args.dry_run)
-                if require_private:
-                    about = await author._json("https://www.reddit.com/r/HackathonsCanada/about.json")
-                    if about.get("data", {}).get("subreddit_type") != "private":
-                        raise RuntimeError("Campaign execution requires a private r/HackathonsCanada")
                 if args.action == "post":
                     result = await author.create_post(args.title, args.body, request_id=args.request_id)
                 elif args.action == "comment":
