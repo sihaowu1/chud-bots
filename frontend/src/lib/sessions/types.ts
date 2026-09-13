@@ -5,6 +5,17 @@ export interface CampaignPlan {
   id: string;
   prompt: string;
   status: string;
+  execution_status?: "running" | "completed" | "failed";
+  execution_error?: string;
+  events?: {
+    type: string;
+    task_id?: string;
+    status?: string;
+    kind?: string;
+    persona?: string;
+    url?: string | null;
+    note?: string | null;
+  }[];
   phases: {
     number: number;
     summary: string;

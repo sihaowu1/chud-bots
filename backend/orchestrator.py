@@ -9,6 +9,12 @@ from .agent import Dreamer
 _agents: dict[str, Dreamer] = {}
 
 
+def register(dreamer: Dreamer) -> None:
+    """Expose an externally driven Dreamer through the shared agent feed."""
+    _agents[dreamer.state.id] = dreamer
+    events.publish("agent", agent=dreamer.state.snapshot())
+
+
 def live_count() -> int:
     return sum(1 for d in _agents.values() if d.state.status in ("queued", "running"))
 

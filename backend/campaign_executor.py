@@ -1,6 +1,7 @@
-"""Bounded, serial execution of durable coordinator commands through the CLI publisher."""
+"""Bounded campaign execution with concurrent dashboard browser tasks."""
 
 import argparse
+import asyncio
 import json
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -30,106 +31,160 @@ def execution_lock(directory):
 
 
 class CampaignExecutor:
-    def __init__(self, coordinator, publisher=publish):
+    def __init__(self, coordinator, publisher=publish, *, open_all_browsers=False):
         self.coordinator = coordinator
         self.publisher = publisher
+        self.open_all_browsers = open_all_browsers
 
     async def execute(self, run_id, *, phases=1):
         if phases < 1:
             raise ValueError("phases must be positive")
         with execution_lock(self.coordinator.runs_dir):
-            orchestrator_log.append(
-                run_id, "cli", {"event": "executor_started", "phases": phases},
-                logs_dir=self.coordinator.logs_dir,
-            )
             run = self.coordinator.get(run_id)
-            if run["environment"] not in {"mock", "private"}:
-                raise ValueError("unsupported execution environment")
             previous = {e["task_id"]: e["status"] for e in run["events"]
                         if e["type"] == "agent_activity"}
             if any(status in {"started", "failed"} for status in previous.values()):
                 raise RuntimeError("Inspect and reconcile started/failed tasks before resuming this run")
-            for phase in range(phases):
-                if phase:
-                    run = await self.coordinator.continue_run(run_id)
-                progressed = False
-                tasks = [task for p in run["phases"] for task in p["assignments"]]
-                for task in tasks:
-                    run = self.coordinator.get(run_id)
-                    activity = {
-                        event["task_id"]: event for event in run["events"]
-                        if event["type"] == "agent_activity"
-                    }
-                    # Started/failed tasks need inspection, never an automatic retry.
-                    if task["id"] in activity:
-                        continue
-                    if any(activity.get(dep, {}).get("status") != "completed"
-                           for dep in task["wait_for"]):
-                        continue
-                    kind = {
-                        "create_post": "post",
-                        "create_profile_post": "post",
-                        "comment": "comment",
-                        "wait": "wait",
-                    }[task["action"]]
-                    async def report(status, **fields):
-                        return await self.coordinator.record_activity(
-                            run_id, persona=task["persona"], task_id=task["id"],
-                            kind=kind, status=status, continue_after=False, **fields,
-                        )
-                    if kind == "wait":
-                        await report("completed", note=task["instructions"])
-                        continue
-                    await report("started")
-                    try:
-                        command = self._command(task, tasks, activity, run["environment"])
-                        orchestrator_log.append(
-                            run_id, "cli",
-                            {"event": "command", "task_id": task["id"],
-                             "command": vars(command)},
-                            logs_dir=self.coordinator.logs_dir,
-                        )
-                        content = validated_body(
-                            command.body, 40_000 if kind == "post" else 10_000
-                        )
-                        if run["environment"] == "mock":
-                            path = "profile-posts" if task["action"] == "create_profile_post" else (
-                                "posts" if kind == "post" else "comments"
-                            )
-                            result = {
-                                "url": f"https://mock.local/{path}/{task['id']}",
-                                "reddit_username": f"synthetic_{task['persona'].lower()}",
-                            }
-                        else:
-                            result = await self.publisher(command)
-                        await report(
-                            "completed", content=content, url=result["url"],
-                            reddit_username=result["reddit_username"],
-                            parent_url=command.post_url,
-                            note=json.dumps({"title": command.title, "result": result}),
-                        )
-                        orchestrator_log.append(
-                            run_id, "output",
-                            {"source": "publisher", "task_id": task["id"], "result": result},
-                            logs_dir=self.coordinator.logs_dir,
-                        )
-                        progressed = True
-                    except Exception as exc:
-                        await report("failed", note=str(exc))
-                        orchestrator_log.append(
-                            run_id, "output",
-                            {"source": "publisher", "task_id": task["id"],
-                             "error": f"{type(exc).__name__}: {exc}"},
-                            logs_dir=self.coordinator.logs_dir,
-                        )
-                        # Stop this batch so the planner cannot replace uncertain writes.
-                        return self.coordinator.get(run_id)
+            if not self.open_all_browsers or run["environment"] != "private":
+                return await self._execute_tasks(run_id, phases=phases)
+            assigned = {
+                task["persona"] for phase in run["phases"] for task in phase["assignments"]
+                if task["action"] in {"create_post", "create_profile_post", "comment"}
+            }
+            missing = [name for name in run["personas"] if name not in assigned]
+            if missing:
+                raise RuntimeError(
+                    "Create a new plan with a post or comment for every selected persona; missing: "
+                    + ", ".join(missing)
+                )
+            from .campaign_browsers import CampaignBrowsers
+            browsers = CampaignBrowsers(run["personas"])
+            browsers.start()
+            original_publisher = self.publisher
+            self.publisher = browsers.publish
+            try:
+                # Each publish waits only for its own browser. Slow or failed
+                # signups must not hold up authenticated peers.
+                result = await self._execute_tasks(run_id, phases=phases)
+                await browsers.wait_ready()
+                return result
+            except asyncio.CancelledError:
+                await browsers.stop()
+                raise
+            finally:
+                browsers.finish()
+                self.publisher = original_publisher
+
+    async def _execute_tasks(self, run_id, *, phases):
+        orchestrator_log.append(
+            run_id, "cli", {"event": "executor_started", "phases": phases},
+            logs_dir=self.coordinator.logs_dir,
+        )
+        run = self.coordinator.get(run_id)
+        if run["environment"] not in {"mock", "private"}:
+            raise ValueError("unsupported execution environment")
+        previous = {e["task_id"]: e["status"] for e in run["events"]
+                    if e["type"] == "agent_activity"}
+        if any(status in {"started", "failed"} for status in previous.values()):
+            raise RuntimeError("Inspect and reconcile started/failed tasks before resuming this run")
+        for phase in range(phases):
+            if phase:
+                run = await self.coordinator.continue_run(run_id)
+            progressed = False
+            tasks = [task for p in run["phases"] for task in p["assignments"]]
+            while True:
                 run = self.coordinator.get(run_id)
-                latest = {e["task_id"]: e["status"] for e in run["events"]
-                          if e["type"] == "agent_activity"}
-                if not progressed or any(latest.get(t["id"]) != "completed" for t in tasks):
+                activity = {e["task_id"]: e for e in run["events"] if e["type"] == "agent_activity"}
+                ready = []
+                owners = set()
+                for task in tasks:
+                    if task["id"] in activity or task["persona"] in owners:
+                        continue
+                    if any(activity.get(dep, {}).get("status") != "completed" for dep in task["wait_for"]):
+                        continue
+                    ready.append(task)
+                    owners.add(task["persona"])
+                    if not self.open_all_browsers:
+                        break
+                if not ready:
                     break
-            return self.coordinator.get(run_id)
+                # At most one command per persona/profile at a time. All peer
+                # results settle before another wave or planning phase begins.
+                async with asyncio.TaskGroup() as group:
+                    executions = [group.create_task(self._execute_assignment(run_id, task, tasks)) for task in ready]
+                results = [execution.result() for execution in executions]
+                if any(result is False for result in results):
+                    return self.coordinator.get(run_id)
+                progressed = progressed or any(result is True for result in results)
+            run = self.coordinator.get(run_id)
+            latest = {e["task_id"]: e["status"] for e in run["events"]
+                      if e["type"] == "agent_activity"}
+            if not progressed or any(latest.get(t["id"]) != "completed" for t in tasks):
+                break
+        return self.coordinator.get(run_id)
+
+
+    async def _execute_assignment(self, run_id, task, tasks):
+        run = self.coordinator.get(run_id)
+        activity = {e["task_id"]: e for e in run["events"] if e["type"] == "agent_activity"}
+        kind = {
+            "create_post": "post",
+            "create_profile_post": "post",
+            "comment": "comment",
+            "wait": "wait",
+        }[task["action"]]
+        async def report(status, **fields):
+            return await self.coordinator.record_activity(
+                run_id, persona=task["persona"], task_id=task["id"],
+                kind=kind, status=status, continue_after=False, **fields,
+            )
+        if kind == "wait":
+            await report("completed", note=task["instructions"])
+            return None
+        await report("started")
+        try:
+            command = self._command(task, tasks, activity, run["environment"])
+            orchestrator_log.append(
+                run_id, "cli",
+                {"event": "command", "task_id": task["id"],
+                 "command": vars(command)},
+                logs_dir=self.coordinator.logs_dir,
+            )
+            content = validated_body(
+                command.body, 40_000 if kind == "post" else 10_000
+            )
+            if run["environment"] == "mock":
+                path = "profile-posts" if task["action"] == "create_profile_post" else (
+                    "posts" if kind == "post" else "comments"
+                )
+                result = {
+                    "url": f"https://mock.local/{path}/{task['id']}",
+                    "reddit_username": f"synthetic_{task['persona'].lower()}",
+                }
+            else:
+                result = await self.publisher(command)
+            await report(
+                "completed", content=content, url=result["url"],
+                reddit_username=result["reddit_username"],
+                parent_url=command.post_url,
+                note=json.dumps({"title": command.title, "result": result}),
+            )
+            orchestrator_log.append(
+                run_id, "output",
+                {"source": "publisher", "task_id": task["id"], "result": result},
+                logs_dir=self.coordinator.logs_dir,
+            )
+            return True
+        except Exception as exc:
+            await report("failed", note=str(exc))
+            orchestrator_log.append(
+                run_id, "output",
+                {"source": "publisher", "task_id": task["id"],
+                 "error": f"{type(exc).__name__}: {exc}"},
+                logs_dir=self.coordinator.logs_dir,
+            )
+            # Finish already-running peers, but do not start another batch after failure.
+            return False
 
     @staticmethod
     def _command(task, tasks, activity, environment):

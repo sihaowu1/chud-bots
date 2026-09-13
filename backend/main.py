@@ -22,33 +22,41 @@ from .orchestrator_agent import (
     OrchestratorConfigurationError,
     OrchestratorModelError,
 )
+from .campaign_executor import CampaignExecutor
 from .profile_post_orchestrator import ProfilePostOrchestrator
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
+    for task in _campaign_executions.values():
+        task.cancel()
+    if _campaign_executions:
+        await asyncio.gather(*_campaign_executions.values(), return_exceptions=True)
     await orchestrator.stop_all()
 
 
 app = FastAPI(title="Inception", lifespan=lifespan)
 campaign_orchestrator = CampaignOrchestrator()
 profile_post_orchestrator = ProfilePostOrchestrator()
+_campaign_executions: dict[str, asyncio.Task] = {}
+_campaign_execution_results: dict[str, dict] = {}
 
 
-def _least_used_personas(count: int, selected_personas: list[str] | None = None) -> list[str]:
-    if selected_personas is not None:
-        return [persona.name for persona in orchestrator.resolve_personas(count, selected_personas)]
-    order = {name: index for index, name in enumerate(personas.names())}
+def _execution_finished(run_id: str, task: asyncio.Task) -> None:
+    _campaign_executions.pop(run_id, None)
+    try:
+        task.result()
+        _campaign_execution_results[run_id] = {"execution_status": "completed"}
+    except asyncio.CancelledError:
+        _campaign_execution_results[run_id] = {"execution_status": "failed", "execution_error": "Campaign execution stopped"}
+    except Exception as exc:  # The durable run contains task-level publisher failures.
+        _campaign_execution_results[run_id] = {"execution_status": "failed", "execution_error": str(exc)}
+        events.publish("log", msg=f"campaign {run_id} failed: {type(exc).__name__}: {exc}")
 
-    def usage(name: str) -> tuple[int, int]:
-        ledger = agent_state_store.public_ledger(name)
-        return (
-            len(ledger.get("assignments", [])) + len(ledger.get("activity", [])),
-            order[name],
-        )
 
-    return sorted(personas.names(), key=usage)[:count]
+def _ordered_personas(count: int, selected_personas: list[str] | None = None) -> list[str]:
+    return [persona.name for persona in orchestrator.resolve_personas(count, selected_personas)]
 
 
 def _library_posts() -> list[dict]:
@@ -134,6 +142,10 @@ class ActivityRequest(BaseModel):
     continue_after: bool = True
 
 
+class ExecutionRequest(BaseModel):
+    phases: int = Field(2, ge=1, le=5)
+
+
 @app.post("/api/runs")
 async def launch(req: LaunchRequest):
     try:
@@ -215,7 +227,7 @@ async def create_orchestration(req: OrchestrationRequest):
             raise ValueError("campaign prompt cannot be blank")
         selected_personas = req.personas
         if req.count is not None:
-            selected_personas = _least_used_personas(req.count, req.personas)
+            selected_personas = _ordered_personas(req.count, req.personas)
         return await campaign_orchestrator.start(
             prompt,
             selected_personas=selected_personas,
@@ -232,7 +244,7 @@ async def create_orchestration(req: OrchestrationRequest):
 @app.get("/api/orchestrations/{run_id}")
 async def get_orchestration(run_id: str):
     try:
-        return campaign_orchestrator.get(run_id)
+        return {**campaign_orchestrator.get(run_id), **_campaign_execution_results.get(run_id, {})}
     except KeyError as exc:
         raise HTTPException(404, "no such orchestration") from exc
     except ValueError as exc:
@@ -254,6 +266,34 @@ async def continue_orchestration(run_id: str):
         raise HTTPException(503, str(exc)) from exc
     except OrchestratorModelError as exc:
         raise HTTPException(502, str(exc)) from exc
+
+
+@app.post("/api/orchestrations/{run_id}/execute")
+async def execute_orchestration(run_id: str, req: ExecutionRequest):
+    """Start pending assignments without holding the HTTP request open."""
+    try:
+        run = campaign_orchestrator.get(run_id)
+        active = _campaign_executions.get(run_id)
+        if active is not None and not active.done():
+            raise RuntimeError("Campaign execution is already running")
+        task = asyncio.create_task(
+            CampaignExecutor(campaign_orchestrator, open_all_browsers=True).execute(run_id, phases=req.phases),
+            name=f"campaign-{run_id}",
+        )
+        _campaign_executions[run_id] = task
+        _campaign_execution_results[run_id] = {"execution_status": "running"}
+        task.add_done_callback(lambda done: _execution_finished(run_id, done))
+        return {**run, "execution_status": "running"}
+    except KeyError as exc:
+        raise HTTPException(404, "no such orchestration") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except OrchestratorConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except OrchestratorModelError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/orchestrations/{run_id}/activity")

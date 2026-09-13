@@ -217,9 +217,13 @@ class Dreamer:
                 return
 
             self._emit(note="opening Temp-Mail for an email address")
-            self._temp_mail_page = page
-            await page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded")
-            handle = await page.wait_for_function(
+            hostname = urlparse(page.url).hostname or ""
+            mailbox = page
+            if hostname == "reddit.com" or hostname.endswith(".reddit.com"):
+                mailbox = await page.context.new_page()
+            self._temp_mail_page = mailbox
+            await mailbox.goto(TEMP_MAIL_URL, wait_until="domcontentloaded")
+            handle = await mailbox.wait_for_function(
                 """
                 () => {
                     const preferred = document.querySelector("#mail, input.emailbox-input");
@@ -232,11 +236,11 @@ class Dreamer:
                 timeout=30_000,
             )
             self.state.email = str(await handle.json_value())
-            await self._copy_email(page, self.state.email)
+            await self._copy_email(mailbox, self.state.email)
             email["address"] = self.state.email
             email.setdefault("login", None)
             agent_state_store.save(self.persona.name, saved)
-            self._emit(note=f"saved email {self.state.email}", url=page.url)
+            self._emit(note=f"saved email {self.state.email}", url=mailbox.url)
 
     async def _copy_email(self, page: Page, address: str) -> None:
         """Copy the generated address through the browser's real clipboard."""

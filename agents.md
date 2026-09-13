@@ -307,6 +307,29 @@ operations for each persona/profile; different request IDs are independent.
 
 ### Planning
 
+Dashboard execution opens one real Steel browser for every selected persona at
+the same time. Execution requires a post or comment assignment for every selected
+persona, including plans saved before that requirement was introduced. Each
+agent starts its task as soon as its own login succeeds; it does not wait for
+other agents to authenticate. Commands reuse those browsers across phases.
+After execution, browsers remain visible for five minutes, with Kick and
+Stop All releasing them immediately. Startup or authentication failures are
+reported as execution failures, not campaign success. Independent dashboard
+commands run concurrently, with one command per persona at a time and confirmed
+dependencies required before comments start. A failed task stops later batches
+after already-running peers settle. One persona's authentication failure does
+not prevent authenticated peers from executing their ready assignments. The
+campaign still reports the failed persona. The standalone CLI retains serial execution
+and its per-command session lifecycle.
+
+New campaigns use only their own assignments and activity as planning history.
+An explicit request to post or promote requires a new post assignment; a prior
+campaign on the same topic does not fulfill it. Saved persona identities and
+durable receipts persist, and resuming a task retains its submission protections.
+The first plan must give every selected persona a post or comment assignment;
+plans that omit a persona or leave it with only a wait are rejected. Later phases
+may finish or wait once the requested work is complete or blocked.
+
 Set `OPENAI_API_KEY`, then send the user's campaign prompt to
 `POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium
 reasoning by default; both values can be overridden with

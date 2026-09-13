@@ -18,7 +18,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { SessionCard } from "@/components/activity/session-card";
-import { CampaignPlanView } from "@/components/activity/campaign-plan";
 import { LaunchPanel } from "@/components/activity/launch-panel";
 import { SessionLog } from "@/components/activity/session-log";
 import { AnimatedNumber } from "@/components/shared/animated-number";
@@ -103,7 +102,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="space-y-4 px-6 pb-8 pt-5">
-          <CampaignPlanView />
           {ordered.length === 0 ? (
             <div className="rounded-lg border border-border bg-surface">
               <EmptyState
@@ -112,7 +110,7 @@ export default function DashboardPage() {
                 description={
                   connection === "offline"
                     ? "Start the backend to see live sessions here."
-                    : "Create a plan with the orchestrator from the panel on the right. Browser sessions appear here when launched separately."
+                    : "Enter a prompt in the panel on the right to start the agents."
                 }
               />
             </div>

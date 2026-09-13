@@ -127,6 +127,34 @@ def dreamer():
 
 
 class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reddit_challenge_uses_separate_temp_mail_tab(self):
+        agent = dreamer()
+        reddit = FakePage(FakeField())
+        reddit.url = "https://www.reddit.com/?js_challenge=1"
+        mailbox = FakePage(FakeField())
+        handle = SimpleNamespace(
+            json_value=AsyncMock(return_value="person@example.com")
+        )
+        mailbox.wait_for_function = AsyncMock(return_value=handle)
+        reddit.context = SimpleNamespace(new_page=AsyncMock(return_value=mailbox))
+
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={"email": {"address": None, "password": None}},
+            ),
+            patch.object(agent_state_store, "save") as save,
+            patch.object(agent, "_copy_email", new=AsyncMock()) as copy_email,
+        ):
+            await agent._ensure_email(reddit)
+
+        reddit.context.new_page.assert_awaited_once_with()
+        self.assertNotIn("https://temp-mail.org/en/", reddit.visits)
+        self.assertEqual(mailbox.visits, ["https://temp-mail.org/en/"])
+        copy_email.assert_awaited_once_with(mailbox, "person@example.com")
+        save.assert_called_once()
+
     async def test_saved_login_checks_email_code_before_confirming_home(self):
         agent = dreamer()
         page = FakePage(FakeField())

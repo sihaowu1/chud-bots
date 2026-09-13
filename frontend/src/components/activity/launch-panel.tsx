@@ -12,6 +12,7 @@ import { toast } from "@/components/shared/toast";
 /** Sends the dashboard query to the orchestrator. */
 export function LaunchPanel() {
   const planCampaign = useSessions((s) => s.planCampaign);
+  const executeCampaign = useSessions((s) => s.executeCampaign);
   const stopAll = useSessions((s) => s.stopAll);
   const clear = useSessions((s) => s.clear);
   const running = useSessions(
@@ -25,18 +26,21 @@ export function LaunchPanel() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
+    const query = prompt.trim();
     try {
-      await planCampaign({
-        prompt: prompt.trim(),
-        count,
-      });
+      const plan = await planCampaign({ prompt: query, count });
+      const result = await executeCampaign(plan.id);
+      const assignments = result.phases.flatMap((phase) => phase.assignments);
+      const hasBrowserTasks = assignments.some((task) => task.action !== "wait");
       toast({
-        title: "Orchestrator plan ready",
-        description: "Review the assignments on the dashboard",
+        title: hasBrowserTasks ? "Campaign executed" : "Agents are idle",
+        description: hasBrowserTasks
+          ? "Review the completed assignments on the dashboard"
+          : `Selected agents are signed in and idle. ${assignments[0]?.instructions || "The planner returned no assignments."}`,
       });
     } catch (err) {
       toast({
-        title: "Planning failed",
+        title: "Campaign failed",
         description: String(err instanceof Error ? err.message : err),
       });
     } finally {
@@ -48,7 +52,7 @@ export function LaunchPanel() {
     <form onSubmit={submit} className="space-y-4">
       <p className="text-xs text-muted-foreground">
         The orchestrator uses your query and agent history to assign posts,
-        comments, or waits. Review the plan here; execution is a separate step.
+        comments, or waits, then executes the plan with Steel browser sessions.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="profile-query" className="text-xs font-normal text-muted-foreground">
@@ -83,7 +87,7 @@ export function LaunchPanel() {
           ) : (
             <Play data-icon="inline-start" />
           )}
-          {busy ? "Planning..." : "Create plan"}
+          {busy ? "Executing..." : "Create plan + execute"}
         </Button>
       </div>
       <div className="flex items-center gap-1.5 border-t border-border pt-3">

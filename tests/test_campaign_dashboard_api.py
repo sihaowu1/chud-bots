@@ -23,34 +23,11 @@ class CampaignDashboardApiTests(unittest.IsolatedAsyncioTestCase):
                 "Plan a demo", selected_personas=personas.names()[:3], environment="mock"
             )
 
-    async def test_dashboard_count_prefers_less_used_personas(self):
-        plan = {"id": "dashboard-run", "phases": []}
-
-        def ledger(name):
-            used = {"Yusuf": 4, "Cobb": 3, "Arthur": 2}.get(name, 0)
-            return {
-                "persona": name,
-                "reddit_username": None,
-                "assignments": [{}] * used,
-                "activity": [],
-            }
-
-        with patch.object(main.campaign_orchestrator, "start", new_callable=AsyncMock) as start, \
-                patch.object(main.agent_state_store, "public_ledger", side_effect=ledger):
-            start.return_value = plan
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=main.app), base_url="http://test"
-            ) as client:
-                response = await client.post("/api/orchestrations", json={
-                    "prompt": "promote better public transit", "count": 3, "environment": "mock",
-                })
-
-            self.assertEqual(response.status_code, 200)
-            start.assert_awaited_once_with(
-                "promote better public transit",
-                selected_personas=["Ariadne", "Eames", "Saito"],
-                environment="mock",
-            )
+    async def test_dashboard_count_uses_configured_persona_order(self):
+        for count in range(1, len(personas.names()) + 1):
+            self.assertEqual(main._ordered_personas(count), personas.names()[:count])
+        self.assertEqual(main._ordered_personas(2), ["Yusuf", "Cobb"])
+        self.assertEqual(main._ordered_personas(2, ["Arthur", "Cobb"]), ["Arthur", "Cobb"])
 
     async def test_invalid_dashboard_requests_do_not_call_planner(self):
         with patch.object(main.campaign_orchestrator, "start", new_callable=AsyncMock) as start:

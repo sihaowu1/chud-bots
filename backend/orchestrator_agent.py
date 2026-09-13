@@ -52,15 +52,24 @@ _PLAN_SCHEMA = {
 _SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for Reddit content.
 Read and obey the supplied orchestrator instructions. Assign the smallest useful next step to
 each selected persona. The only actions are create_post, create_profile_post, comment, and wait.
+In the first phase, give EVERY selected persona a productive assignment: create_post,
+create_profile_post, or comment. Do not leave selected personas unassigned or give them
+placeholder waits. Use comments only when a valid target already exists; otherwise assign
+distinct posts relevant to the prompt. Later phases may wait once the requested work is
+complete or a task is blocked. Do not add unnecessary work after completion.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
-Use existing_posts or existing_comments when a useful completed post or comment from this or
-another run is available for a reply. For those comments, set target_url to the existing URL
+Each new run is a new user request. When the current prompt asks for a post (including
+promotion), assign a new create_post or create_profile_post in the first phase. Past runs
+never satisfy the current request, even if their topic or prompt is identical. Assess
+completion and submission blockers only against the current run's tasks and activity.
+Use existing_posts or existing_comments when a useful completed post or comment from this
+run is available for a reply. For those comments, set target_url to the existing URL
 and leave wait_for empty unless the comment also depends on a current-run task.
 All comments must target posts or comments created by another selected persona. Do not comment
 on outside users' posts, outside comments, or the same persona's own content.
-Do not assign duplicate work that is already completed or in progress. Keep persona voices
+Do not duplicate a task already completed or in progress within this run. Keep persona voices
 distinct. Supply final title and body for create_post and create_profile_post, body for
 comment, and null title/body for wait. Instructions summarize the command. Comments may
 reply to posts or to existing comments. Use an observed post or comment URL as target_url,
@@ -348,6 +357,16 @@ class CampaignOrchestrator:
                 f"could not read ORCHESTRATOR.md: {exc}"
             ) from exc
         ledgers = [agent_state_store.public_ledger(name) for name in run["personas"]]
+        # Persona identities persist, but previous campaigns must not fulfill or
+        # block a new request. Durable receipts still protect retries of a task.
+        ledgers = [
+            {
+                **ledger,
+                "assignments": [item for item in ledger["assignments"] if item.get("run_id") == run["id"]],
+                "activity": [item for item in ledger["activity"] if item.get("run_id") == run["id"]],
+            }
+            for ledger in ledgers
+        ]
         return {
             "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
@@ -422,6 +441,14 @@ class CampaignOrchestrator:
                     "body": item.get("body"),
                 }
             )
+        if not run["phases"]:
+            active = {item["persona"] for item in assignments if item["action"] != "wait"}
+            missing = [name for name in run["personas"] if name not in active]
+            if missing:
+                raise OrchestratorModelError(
+                    "First phase requires a post or comment for every selected persona; missing: "
+                    + ", ".join(missing)
+                )
         return assignments
 
     def _validate_personas(self, requested: list[str]) -> list[str]:
