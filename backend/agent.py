@@ -33,7 +33,7 @@ REDDIT_HOME_URL = "https://www.reddit.com/"
 # Reddit has successfully logged in. Keep this timeout effectively out of the way.
 CAPTCHA_SOLVE_TIMEOUT_SECONDS = 10_000_000
 CAPTCHA_POLL_INTERVAL_SECONDS = 1
-LOGIN_ONLY_DWELL_SECONDS = 10
+LOGIN_ONLY_DWELL_SECONDS = 5 * 60
 REDDIT_LOGIN_TIMEOUT_SECONDS = 60
 
 _EMAIL_LOCKS: dict[str, asyncio.Lock] = {}
@@ -460,8 +460,10 @@ class Dreamer:
         if not self.state.query.strip():
             if not self._reddit_authenticated:
                 await self._wait_for_reddit_home(page)
-            self._emit(0, "holding logged-in session for 10 seconds", page.url)
-            await asyncio.sleep(LOGIN_ONLY_DWELL_SECONDS)
+            self._emit(0, "holding logged-in session for 5 minutes", page.url)
+            for _ in range(LOGIN_ONLY_DWELL_SECONDS):
+                self._check_stop()
+                await asyncio.sleep(1)
             self._check_stop()
             self._emit(0, "login-only run complete", page.url)
             return

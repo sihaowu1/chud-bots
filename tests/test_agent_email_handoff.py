@@ -343,7 +343,8 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         search.assert_not_awaited()
         land.assert_not_awaited()
         deepen.assert_not_awaited()
-        sleep.assert_awaited_once_with(10)
+        self.assertEqual(sleep.await_count, 300)
+        self.assertTrue(all(call.args == (1,) for call in sleep.await_args_list))
         self.assertEqual(agent.state.level, 0)
         self.assertEqual(agent.state.note, "login-only run complete")
 

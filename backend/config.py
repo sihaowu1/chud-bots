@@ -25,4 +25,5 @@ SESSION_TIMEOUT_MS = 10 * 60 * 1000
 DISPLAY_DIR = ROOT / "display"
 AGENT_STATES_DIR = ROOT / "backend" / "agent_states"
 ORCHESTRATOR_RUNS_DIR = ROOT / "backend" / "orchestrator_runs"
-AGENTS_INSTRUCTIONS_PATH = ROOT / "agents.md"
+ORCHESTRATOR_LOGS_DIR = ROOT / "orchestrator_logs"
+ORCHESTRATOR_INSTRUCTIONS_PATH = ROOT / "ORCHESTRATOR.md"
