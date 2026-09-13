@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
+from . import orchestrator_log
 from .orchestrator_agent import CampaignOrchestrator
 from .reddit_author import disclosed_body, thread_url
 from .reddit_runner import publish
@@ -37,6 +38,11 @@ class CampaignExecutor:
         if phases < 1:
             raise ValueError("phases must be positive")
         with execution_lock(self.coordinator.runs_dir):
+            orchestrator_log.append(
+                run_id, "cli", {"event": "executor_started", "phases": phases,
+                                "private_consented": private_consented},
+                logs_dir=self.coordinator.logs_dir,
+            )
             run = self.coordinator.get(run_id)
             if run["environment"] not in {"mock", "private"}:
                 raise ValueError("unsupported execution environment")
@@ -75,6 +81,12 @@ class CampaignExecutor:
                     await report("started")
                     try:
                         command = self._command(task, tasks, activity, run["environment"])
+                        orchestrator_log.append(
+                            run_id, "cli",
+                            {"event": "command", "task_id": task["id"],
+                             "command": vars(command)},
+                            logs_dir=self.coordinator.logs_dir,
+                        )
                         content = disclosed_body(command.body, 40_000 if kind == "post" else 10_000)
                         if run["environment"] == "mock":
                             result = {
@@ -89,9 +101,20 @@ class CampaignExecutor:
                             parent_url=command.post_url,
                             note=json.dumps({"title": command.title, "result": result}),
                         )
+                        orchestrator_log.append(
+                            run_id, "output",
+                            {"source": "publisher", "task_id": task["id"], "result": result},
+                            logs_dir=self.coordinator.logs_dir,
+                        )
                         progressed = True
                     except Exception as exc:
                         await report("failed", note=str(exc))
+                        orchestrator_log.append(
+                            run_id, "output",
+                            {"source": "publisher", "task_id": task["id"],
+                             "error": f"{type(exc).__name__}: {exc}"},
+                            logs_dir=self.coordinator.logs_dir,
+                        )
                         # Stop this batch so the planner cannot replace uncertain writes.
                         return self.coordinator.get(run_id)
                 run = self.coordinator.get(run_id)
@@ -152,6 +175,10 @@ async def cli(argv):
         run_id = run["id"]
     else:
         run_id = args.run_id
+    orchestrator_log.append(
+        run_id, "cli", {"event": "invocation", "argv": list(argv)},
+        logs_dir=coordinator.logs_dir,
+    )
     result = await CampaignExecutor(coordinator).execute(
         run_id, phases=args.phases, private_consented=args.private_consented,
     )

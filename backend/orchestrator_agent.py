@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from . import agent_state_store, config, events, personas
+from . import agent_state_store, config, events, orchestrator_log, personas
 
 ALLOWED_ACTIONS = {"create_post", "comment", "wait"}
 ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
@@ -132,9 +132,15 @@ class OpenAIResponsesPlanner:
 class CampaignOrchestrator:
     """Creates runs, advances phases, and owns the durable coordination audit."""
 
-    def __init__(self, planner: Planner | None = None, runs_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        planner: Planner | None = None,
+        runs_dir: Path | None = None,
+        logs_dir: Path | None = None,
+    ) -> None:
         self.planner = planner or OpenAIResponsesPlanner()
         self.runs_dir = runs_dir or config.ORCHESTRATOR_RUNS_DIR
+        self.logs_dir = logs_dir or config.ORCHESTRATOR_LOGS_DIR
         self._lock = asyncio.Lock()
 
     async def start(
@@ -233,6 +239,12 @@ class CampaignOrchestrator:
             run["status"] = "planning" if continue_after else "active"
             self._save(run)
             events.publish("log", msg=f"{persona} reported {kind} {status} for {task_id}")
+            orchestrator_log.append(
+                run_id,
+                "output",
+                {"source": "activity_callback", "activity": activity},
+                logs_dir=self.logs_dir,
+            )
 
         return await self._advance(run) if continue_after else run
 
@@ -244,13 +256,33 @@ class CampaignOrchestrator:
         try:
             proposal = await self.planner.plan(context)
             assignments = self._validate_plan(proposal, run)
-        except Exception:
+        except Exception as exc:
             async with self._lock:
                 latest = self._load(run["id"])
                 latest["status"] = "failed"
                 latest["updated_at"] = _timestamp()
                 self._save(latest)
+                orchestrator_log.append(
+                    run["id"],
+                    "output",
+                    {"source": "planner", "error": f"{type(exc).__name__}: {exc}"},
+                    logs_dir=self.logs_dir,
+                )
             raise
+
+        orchestrator_log.append(
+            run["id"],
+            "thinking",
+            {
+                "phase": len(run["phases"]) + 1,
+                "summary": proposal["summary"],
+                "model": run["model"],
+                "reasoning_effort": run["reasoning_effort"],
+                "context": context,
+                "note": "The Responses API exposes the plan summary, not private chain-of-thought.",
+            },
+            logs_dir=self.logs_dir,
+        )
 
         async with self._lock:
             latest = self._load(run["id"])
@@ -283,6 +315,12 @@ class CampaignOrchestrator:
             self._save(latest)
             for task in persisted:
                 events.publish("orchestrator", run_id=latest["id"], assignment=task)
+            orchestrator_log.append(
+                latest["id"],
+                "action",
+                {"phase": phase_number, "assignments": persisted},
+                logs_dir=self.logs_dir,
+            )
             return latest
 
     def _context(self, run: dict[str, Any]) -> dict[str, Any]:

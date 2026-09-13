@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,7 +26,9 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.old = config.AGENT_STATES_DIR
         config.AGENT_STATES_DIR = Path(self.temp.name) / "states"
-        self.coordinator = CampaignOrchestrator(Planner(), Path(self.temp.name) / "runs")
+        self.coordinator = CampaignOrchestrator(
+            Planner(), Path(self.temp.name) / "runs", Path(self.temp.name) / "logs"
+        )
         self.publisher = AsyncMock(return_value={
             "url": "https://www.reddit.com/r/HackathonsCanada/comments/abc/test/",
             "reddit_username": "real_cobb",
@@ -53,6 +56,11 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         resumed = await self.executor.execute(run["id"])
         self.assertEqual(len(resumed["events"]), len(result["events"]))
         self.publisher.assert_not_awaited()
+        logs = sorted((Path(self.temp.name) / "logs" / run["id"]).glob("*.json"),
+                      key=lambda path: int(path.stem))
+        entries = json.loads(logs[-1].read_text())["entries"]
+        self.assertIn("cli", {entry["kind"] for entry in entries})
+        self.assertIn("output", {entry["kind"] for entry in entries})
 
     async def test_private_commands_use_task_id_and_report_identity(self):
         run = await self.start("private")

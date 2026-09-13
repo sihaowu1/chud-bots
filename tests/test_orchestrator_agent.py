@@ -51,6 +51,7 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.orchestrator = CampaignOrchestrator(
             planner=self.planner,
             runs_dir=root / "runs",
+            logs_dir=root / "logs",
         )
 
     async def asyncTearDown(self):
@@ -72,6 +73,11 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         repository_instructions = self.planner.contexts[0]["repository_instructions"]
         self.assertTrue(repository_instructions.startswith("# agents.md"))
         self.assertIn("## What this is", repository_instructions)
+        snapshots = sorted((Path(self.temp_dir.name) / "logs" / run["id"]).glob("*.json"))
+        self.assertEqual([path.name for path in snapshots], ["0.json", "1.json"])
+        latest = json.loads(snapshots[-1].read_text(encoding="utf-8"))
+        self.assertEqual([entry["kind"] for entry in latest["entries"]], ["thinking", "action"])
+        self.assertEqual(latest["previous"], "0.json")
 
     async def test_activity_is_timestamped_and_triggers_next_phase(self):
         run = await self.orchestrator.start("Staged demo", selected_personas=["Cobb"])

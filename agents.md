@@ -263,6 +263,13 @@ assignments, and timestamped post/comment/wait activity. Each orchestration also
 has an aggregate JSON audit under `backend/orchestrator_runs/`. Credentials are
 kept out of the context sent to the model.
 
+Each orchestration also gets an append-only trace in `orchestrator_logs/<run-id>/`.
+Files are numbered from `0.json`; every later file is a cumulative snapshot that
+references and includes the prior entries. Entries distinguish the exposed model
+plan summary/context (`thinking`), persisted assignments (`action`), activity and
+publisher results (`output`), and executor invocations/generated commands (`cli`).
+The API does not expose private model chain-of-thought, so it is never logged.
+
 ## Steel specifics that bit us
 
 - Desktop sessions are created with `use_proxy`, `solve_captcha`, `stealth_config.humanizeInteractions`
