@@ -163,6 +163,18 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 "reddit_username": "synthetic_cobb",
             },
         )
+        agent_state_store.append_activity(
+            "Cobb",
+            {
+                "run_id": "reply-run",
+                "task_id": "reply-run-p1-t1",
+                "kind": "comment",
+                "status": "completed",
+                "content": "A previous reply.",
+                "url": "https://mock.local/comments/reply-run-p1-t1",
+                "reddit_username": "synthetic_cobb",
+            },
+        )
 
         await self.orchestrator.start("Add a reply", selected_personas=["Cobb"])
 
@@ -178,6 +190,116 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 "timestamp": self.planner.contexts[-1]["existing_posts"][0]["timestamp"],
             }],
         )
+        self.assertEqual(
+            self.planner.contexts[-1]["existing_comments"],
+            [{
+                "persona": "Cobb",
+                "task_id": "reply-run-p1-t1",
+                "run_id": "reply-run",
+                "url": "https://mock.local/comments/reply-run-p1-t1",
+                "content": "A previous reply.",
+                "reddit_username": "synthetic_cobb",
+                "timestamp": self.planner.contexts[-1]["existing_comments"][0]["timestamp"],
+            }],
+        )
+
+    async def test_comment_target_must_be_stored_agent_link_from_another_persona(self):
+        agent_state_store.append_activity(
+            "Cobb",
+            {
+                "run_id": "older-run",
+                "task_id": "older-run-p1-t1",
+                "kind": "post",
+                "status": "completed",
+                "content": "A previous kickoff post.",
+                "url": "https://mock.local/posts/older-run-p1-t1",
+                "reddit_username": "synthetic_cobb",
+            },
+        )
+
+        class StoredTargetPlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Reply internally.",
+                    "assignments": [{
+                        "persona": "Arthur",
+                        "action": "comment",
+                        "instructions": "Reply to Cobb's stored post.",
+                        "title": None,
+                        "body": "Adding a reply.",
+                        "target_url": "https://mock.local/posts/older-run-p1-t1",
+                        "wait_for": [],
+                    }],
+                }
+
+        orchestrator = CampaignOrchestrator(
+            planner=StoredTargetPlanner(),
+            runs_dir=Path(self.temp_dir.name) / "stored-runs",
+            logs_dir=Path(self.temp_dir.name) / "stored-logs",
+        )
+        run = await orchestrator.start("Add a reply", selected_personas=["Cobb", "Arthur"])
+
+        self.assertEqual(run["phases"][0]["assignments"][0]["persona"], "Arthur")
+
+    async def test_comment_target_rejects_outside_or_own_links(self):
+        agent_state_store.append_activity(
+            "Cobb",
+            {
+                "run_id": "older-run",
+                "task_id": "older-run-p1-t1",
+                "kind": "post",
+                "status": "completed",
+                "content": "A previous kickoff post.",
+                "url": "https://mock.local/posts/older-run-p1-t1",
+                "reddit_username": "synthetic_cobb",
+            },
+        )
+
+        class OutsidePlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Bad target.",
+                    "assignments": [{
+                        "persona": "Arthur",
+                        "action": "comment",
+                        "instructions": "Reply outside the agent graph.",
+                        "title": None,
+                        "body": "Adding a reply.",
+                        "target_url": "https://mock.local/posts/not-in-ledger",
+                        "wait_for": [],
+                    }],
+                }
+
+        outside = CampaignOrchestrator(
+            planner=OutsidePlanner(),
+            runs_dir=Path(self.temp_dir.name) / "outside-runs",
+            logs_dir=Path(self.temp_dir.name) / "outside-logs",
+        )
+        with self.assertRaisesRegex(Exception, "stored agent post"):
+            await outside.start("Add a reply", selected_personas=["Cobb", "Arthur"])
+
+        class OwnPlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Own target.",
+                    "assignments": [{
+                        "persona": "Cobb",
+                        "action": "comment",
+                        "instructions": "Reply to own post.",
+                        "title": None,
+                        "body": "Adding a reply.",
+                        "target_url": "https://mock.local/posts/older-run-p1-t1",
+                        "wait_for": [],
+                    }],
+                }
+
+        own = CampaignOrchestrator(
+            planner=OwnPlanner(),
+            runs_dir=Path(self.temp_dir.name) / "own-runs",
+            logs_dir=Path(self.temp_dir.name) / "own-logs",
+        )
+        with self.assertRaisesRegex(Exception, "another selected persona"):
+            await own.start("Add a reply", selected_personas=["Cobb", "Arthur"])
 
 
 class ResponseParsingTests(unittest.TestCase):

@@ -29,6 +29,25 @@ def thread_url(value: str) -> str:
     return ORIGIN + parsed.path.rstrip("/") + "/"
 
 
+def comment_target_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or parsed.netloc != "www.reddit.com"
+            or not re.fullmatch(
+                r"/r/HackathonsCanada/comments/[a-z0-9]+/[^/]+(?:/[a-z0-9]+)?/?",
+                parsed.path,
+                re.I,
+            )):
+        raise ValueError("Use a www.reddit.com post or comment permalink in r/HackathonsCanada")
+    return ORIGIN + parsed.path.rstrip("/") + "/"
+
+
+def _comment_parent_id(value: str) -> str:
+    parts = urlsplit(value).path.strip("/").split("/")
+    post_id = parts[3]
+    comment_id = parts[5] if len(parts) > 5 else None
+    return f"t1_{comment_id}" if comment_id else f"t3_{post_id}"
+
+
 def validated_body(body: str, limit: int) -> str:
     body = body.strip()
     if not body:
@@ -162,16 +181,29 @@ class RedditAuthor:
 
     @staticmethod
     def _matches_comment(data: dict, payload: dict, username: str) -> bool:
-        post_id = "t3_" + urlsplit(payload["post_url"]).path.split("/")[4]
         return (data.get("author") == username
                 and data.get("body", "").strip() == payload["body"]
-                and data.get("parent_id") == post_id
+                and data.get("parent_id") == _comment_parent_id(payload["post_url"])
                 and data.get("subreddit", "").casefold() == COMMUNITY.casefold())
 
     @staticmethod
     def _comment_result(data: dict, username: str) -> dict:
         return {"url": ORIGIN + data["permalink"],
                 "reddit_id": data["name"], "reddit_username": username}
+
+    @staticmethod
+    def _comments(data: dict) -> list[dict]:
+        out = []
+        stack = list(data.get("data", {}).get("children", []))
+        while stack:
+            child = stack.pop(0)
+            item = child.get("data", {})
+            if child.get("kind") == "t1" or item.get("name", "").startswith("t1_"):
+                out.append(item)
+            replies = item.get("replies")
+            if isinstance(replies, dict):
+                stack.extend(replies.get("data", {}).get("children", []))
+        return out
 
     async def reconcile_comment(self, request_id: str, comment_id: str) -> dict:
         """Verify an uncertain comment by ID without submitting another reply."""
@@ -307,7 +339,7 @@ class RedditAuthor:
         )
 
     async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
-        url = thread_url(post_url)
+        url = comment_target_url(post_url)
         body = validated_body(body, 10_000)
         payload = dict(action="comment", subreddit=COMMUNITY, post_url=url,
                        body=body, request_id=request_id)
@@ -320,18 +352,26 @@ class RedditAuthor:
         post = before[0]["data"]["children"][0]["data"]
         if post.get("subreddit", "").casefold() != COMMUNITY.casefold() or post.get("locked") or post.get("archived"):
             raise RuntimeError("Post is outside the test subreddit, locked, or archived")
-        existing = {c["data"]["name"] for c in before[1]["data"]["children"]}
+        parent_id = _comment_parent_id(url)
+        if parent_id.startswith("t1_") and parent_id not in {
+            item.get("name") for item in self._comments(before[1])
+        }:
+            raise RuntimeError("Target comment was not found in the thread")
+        existing = {item["name"] for item in self._comments(before[1])}
         editor = self.page.locator('shreddit-composer').filter(has=self.page.locator('[contenteditable="true"]')).first
-        # Reddit keeps both a loading and a ready trigger in slotted DOM.
-        await self.page.locator('faceplate-tracker[noun="add_comment_button"] faceplate-textarea-input').last.click(timeout=15_000)
+        if parent_id.startswith("t1_"):
+            target = self.page.locator(f'shreddit-comment[thingid="{parent_id}"]').first
+            await target.get_by_role("button", name=re.compile(r"^\s*reply\s*$", re.I)).click(timeout=15_000)
+        else:
+            # Reddit keeps both a loading and a ready trigger in slotted DOM.
+            await self.page.locator('faceplate-tracker[noun="add_comment_button"] faceplate-textarea-input').last.click(timeout=15_000)
         await editor.locator('[contenteditable="true"]').fill(body)
 
         async def verify():
             async with asyncio.timeout(45):
                 while True:
                     listing = await self._json(url + ".json?limit=500&sort=new")
-                    for child in listing[1]["data"]["children"]:
-                        data = child["data"]
+                    for data in self._comments(listing[1]):
                         if data.get("name") not in existing and self._matches_comment(data, payload, username):
                             return self._comment_result(data, username)
                     await asyncio.sleep(2)

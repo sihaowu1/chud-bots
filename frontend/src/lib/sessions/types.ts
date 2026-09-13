@@ -21,6 +21,17 @@ export interface CampaignPlan {
   }[];
 }
 
+export interface LibraryPost {
+  id: string;
+  persona: string;
+  url: string;
+  title: string | null;
+  content: string | null;
+  reddit_username: string | null;
+  timestamp: string | null;
+  kind: "post" | "profile_post";
+}
+
 export type SessionStatus =
   "queued" | "running" | "done" | "failed" | "stopped";
 

@@ -55,19 +55,21 @@ each selected persona. The only actions are create_post, create_profile_post, co
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
-Use existing_posts when a useful completed post from this or another run is available for a
-comment. For those comments, set target_url to the existing post URL and leave wait_for empty
-unless the comment also depends on a current-run task.
+Use existing_posts or existing_comments when a useful completed post or comment from this or
+another run is available for a reply. For those comments, set target_url to the existing URL
+and leave wait_for empty unless the comment also depends on a current-run task.
+All comments must target posts or comments created by another selected persona. Do not comment
+on outside users' posts, outside comments, or the same persona's own content.
 Do not assign duplicate work that is already completed or in progress. Keep persona voices
 distinct. Supply final title and body for create_post and create_profile_post, body for
-comment, and null title/body for wait. Instructions summarize the command. Comments are
-top-level replies only. Use an observed post
-URL as target_url, or null with exactly one create_post task ID in wait_for whose
-completed URL the executor will use. Only r/HackathonsCanada is supported in private
-runs for create_post and comments. create_profile_post publishes under the persona's own
-profile and uses null target_url. Mock runs use https://mock.local/posts/<task-id> URLs
-or https://mock.local/profile-posts/<task-id> URLs. Dependencies must reference tasks from
-previous phases. Never issue shell commands.
+comment, and null title/body for wait. Instructions summarize the command. Comments may
+reply to posts or to existing comments. Use an observed post or comment URL as target_url,
+or null with exactly one create_post task ID in wait_for whose completed URL the executor
+will use. Only r/HackathonsCanada is supported in private runs for create_post and
+comments. create_profile_post publishes under the persona's own profile and uses null
+target_url. Mock runs use https://mock.local/posts/<task-id> URLs,
+https://mock.local/comments/<task-id> URLs, or https://mock.local/profile-posts/<task-id>
+URLs. Dependencies must reference tasks from previous phases. Never issue shell commands.
 
 When the user prompt starts with "promote ", treat the remaining text as the cause or idea
 to promote. Prefer create_profile_post assignments for the selected personas so each post is
@@ -354,6 +356,7 @@ class CampaignOrchestrator:
             "run_id": run["id"],
             "previous_phases": run["phases"],
             "existing_posts": _existing_posts(ledgers),
+            "existing_comments": _existing_comments(ledgers),
             "agents": ledgers,
         }
 
@@ -364,6 +367,10 @@ class CampaignOrchestrator:
         if not isinstance(raw_assignments, list) or not raw_assignments:
             raise OrchestratorModelError("plan must contain at least one assignment")
         assignments = []
+        known_targets = _comment_targets(
+            [agent_state_store.public_ledger(name) for name in run["personas"]]
+        )
+        known_ids = {task["id"]: task for phase in run["phases"] for task in phase["assignments"]}
         for item in raw_assignments:
             if not isinstance(item, dict) or item.get("persona") not in run["personas"]:
                 raise OrchestratorModelError("plan referenced an unknown persona")
@@ -374,12 +381,36 @@ class CampaignOrchestrator:
             wait_for = item.get("wait_for")
             if not isinstance(wait_for, list) or not all(isinstance(value, str) for value in wait_for):
                 raise OrchestratorModelError("wait_for must be a list of task IDs")
-            known_ids = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
             if any(task_id not in known_ids for task_id in wait_for):
                 raise OrchestratorModelError("wait_for references an unknown task")
             for field in ("title", "body", "target_url"):
                 if item.get(field) is not None and not isinstance(item[field], str):
                     raise OrchestratorModelError(f"{field} must be a string or null")
+            if item["action"] == "comment":
+                target_url = item.get("target_url")
+                if target_url is not None:
+                    owner = known_targets.get(target_url)
+                    if owner is None:
+                        raise OrchestratorModelError(
+                            "comment target_url must be a stored agent post or comment URL"
+                        )
+                    if owner == item["persona"]:
+                        raise OrchestratorModelError(
+                            "comments must target another selected persona's post or comment"
+                        )
+                else:
+                    post_dependencies = [
+                        known_ids[task_id] for task_id in wait_for
+                        if known_ids[task_id]["action"] == "create_post"
+                    ]
+                    if len(post_dependencies) != 1:
+                        raise OrchestratorModelError(
+                            "comment without target_url needs exactly one create_post dependency"
+                        )
+                    if post_dependencies[0]["persona"] == item["persona"]:
+                        raise OrchestratorModelError(
+                            "comments must target another selected persona's post"
+                        )
             assignments.append(
                 {
                     "persona": item["persona"],
@@ -461,22 +492,37 @@ def _promotion_target(prompt: str) -> str | None:
 
 
 def _existing_posts(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    posts = []
+    return _existing_activity_links(ledgers, "post")
+
+
+def _existing_comments(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _existing_activity_links(ledgers, "comment")
+
+
+def _comment_targets(ledgers: list[dict[str, Any]]) -> dict[str, str | None]:
+    return {
+        item["url"]: item.get("persona")
+        for item in [*_existing_posts(ledgers), *_existing_comments(ledgers)]
+    }
+
+
+def _existing_activity_links(ledgers: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    items = []
     seen = set()
     for ledger in ledgers:
         for activity in ledger.get("activity", []):
             if (
-                activity.get("kind") != "post"
+                activity.get("kind") != kind
                 or activity.get("status") != "completed"
                 or not isinstance(activity.get("url"), str)
-                or not _commentable_post_url(activity["url"])
+                or not _commentable_target_url(activity["url"], kind)
             ):
                 continue
             url = activity["url"]
             if url in seen:
                 continue
             seen.add(url)
-            posts.append({
+            items.append({
                 "persona": ledger.get("persona"),
                 "task_id": activity.get("task_id"),
                 "run_id": activity.get("run_id"),
@@ -485,16 +531,24 @@ def _existing_posts(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "reddit_username": activity.get("reddit_username"),
                 "timestamp": activity.get("timestamp"),
             })
-    return posts
+    return items
 
 
-def _commentable_post_url(value: str) -> bool:
+def _commentable_target_url(value: str, kind: str) -> bool:
     parsed = urlsplit(value)
     if parsed.scheme != "https":
         return False
     if parsed.netloc == "mock.local":
-        return parsed.path.startswith("/posts/")
+        expected = "/posts/" if kind == "post" else "/comments/"
+        return parsed.path.startswith(expected)
+    if parsed.netloc != "www.reddit.com":
+        return False
+    if kind == "post":
+        return (
+            parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+            and len(parsed.path.strip("/").split("/")) == 5
+        )
     return (
-        parsed.netloc == "www.reddit.com"
-        and parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+        parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+        and len(parsed.path.strip("/").split("/")) >= 6
     )

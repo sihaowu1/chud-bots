@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
+  BookOpen,
   Compass,
   LayoutGrid,
   Pause,
@@ -62,6 +63,9 @@ export function CommandPalette({ open, onOpenChange }: Props) {
             </CommandItem>
             <CommandItem onSelect={() => go("/logs")}>
               <ScrollText /> Logs <CommandShortcut>G L</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={() => go("/library")}>
+              <BookOpen /> Library <CommandShortcut>G B</CommandShortcut>
             </CommandItem>
             <CommandItem onSelect={() => go("/opportunities")}>
               <Compass /> Opportunities <CommandShortcut>G O</CommandShortcut>

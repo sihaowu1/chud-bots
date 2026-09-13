@@ -65,3 +65,54 @@ class CampaignDashboardApiTests(unittest.IsolatedAsyncioTestCase):
                     response = await client.post("/api/orchestrations", json=body)
                     self.assertEqual(response.status_code, 422)
             start.assert_not_awaited()
+
+    async def test_library_returns_completed_post_links_from_ledgers(self):
+        def ledger(name):
+            if name == "Cobb":
+                return {
+                    "persona": name,
+                    "reddit_username": "synthetic_cobb",
+                    "assignments": [],
+                    "activity": [
+                        {
+                            "task_id": "post-1",
+                            "kind": "post",
+                            "status": "completed",
+                            "title": "Stored post",
+                            "body": "Stored body",
+                            "url": "https://mock.local/posts/post-1",
+                            "reddit_username": "synthetic_cobb",
+                            "timestamp": "2026-01-02T00:00:00+00:00",
+                        },
+                        {
+                            "task_id": "comment-1",
+                            "kind": "comment",
+                            "status": "completed",
+                            "url": "https://mock.local/comments/comment-1",
+                        },
+                    ],
+                }
+            return {
+                "persona": name,
+                "reddit_username": None,
+                "assignments": [],
+                "activity": [],
+            }
+
+        with patch.object(main.agent_state_store, "public_ledger", side_effect=ledger):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+            ) as client:
+                response = await client.get("/api/library")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["posts"], [{
+            "id": "post-1",
+            "persona": "Cobb",
+            "url": "https://mock.local/posts/post-1",
+            "title": "Stored post",
+            "content": "Stored body",
+            "reddit_username": "synthetic_cobb",
+            "timestamp": "2026-01-02T00:00:00+00:00",
+            "kind": "post",
+        }])

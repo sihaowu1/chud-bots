@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from backend.reddit_author import (
     RedditAuthor,
+    comment_target_url,
     profile_post_url,
     thread_url,
     validated_body,
@@ -31,6 +32,22 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
                     "https://www.reddit.com/r/HackathonsCanada/comments/abc/title/def/"):
             with self.assertRaises(ValueError):
                 thread_url(url)
+
+    def test_comment_target_url_accepts_post_or_comment_permalink(self):
+        self.assertEqual(
+            comment_target_url("https://www.reddit.com/r/HackathonsCanada/comments/abc/title/"),
+            "https://www.reddit.com/r/HackathonsCanada/comments/abc/title/",
+        )
+        self.assertEqual(
+            comment_target_url("https://www.reddit.com/r/HackathonsCanada/comments/abc/title/def/"),
+            "https://www.reddit.com/r/HackathonsCanada/comments/abc/title/def/",
+        )
+        for url in (
+            "https://www.reddit.com/r/other/comments/abc/title/def/",
+            "https://www.reddit.com/user/test/comments/abc/title/def/",
+        ):
+            with self.assertRaises(ValueError):
+                comment_target_url(url)
 
     def test_body_validation_and_limits(self):
         self.assertEqual(validated_body(" test ", 1000), "test")
@@ -164,6 +181,33 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cached, result)
         self.assertEqual(result["reddit_id"], "t1_new")
         editor.get_by_role.return_value.click.assert_awaited_once()
+
+    async def test_comment_can_reply_to_existing_comment(self):
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._open = AsyncMock()
+        post = {"name": "t3_abc", "subreddit": "HackathonsCanada"}
+        parent = {"name": "t1_parent", "parent_id": "t3_abc", "author": "other",
+                  "subreddit": "HackathonsCanada", "body": "Parent"}
+        data = {"name": "t1_new", "parent_id": "t1_parent", "author": "test-user",
+                "subreddit": "HackathonsCanada",
+                "body": validated_body("Nested reply", 10_000),
+                "permalink": "/r/HackathonsCanada/comments/abc/question/new/"}
+        before = [{"data": {"children": [{"data": post}]}}, {"data": {"children": [{"kind": "t1", "data": parent}]}}]
+        after_parent = {**parent, "replies": {"data": {"children": [{"kind": "t1", "data": data}]}}}
+        after = [before[0], {"data": {"children": [{"kind": "t1", "data": after_parent}]}}]
+        self.author._json = AsyncMock(side_effect=[before, after])
+        editor = self.page.locator.return_value.filter.return_value.first
+        editor.locator.return_value.fill = AsyncMock()
+        editor.get_by_role.return_value.click = AsyncMock()
+        self.page.locator.return_value.first.get_by_role.return_value.click = AsyncMock()
+        with patch("backend.reddit_author.agent_state_store.append_activity"):
+            result = await self.author.comment(
+                "https://www.reddit.com/r/HackathonsCanada/comments/abc/question/parent/",
+                "Nested reply",
+                request_id="nested-reply",
+            )
+        self.assertEqual(result["reddit_id"], "t1_new")
+        self.page.locator.return_value.first.get_by_role.return_value.click.assert_awaited_once()
 
     def _uncertain_comment(self):
         payload = {"action": "comment", "subreddit": "HackathonsCanada",

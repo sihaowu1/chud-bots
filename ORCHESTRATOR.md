@@ -23,8 +23,8 @@ necessarily published on the current session.
 ## Context and scope
 
 Read these orchestrator instructions, the environment, previous phases,
-existing_posts, and persona activity ledgers before assigning work. Use only
-selected personas.
+existing_posts, existing_comments, and persona activity ledgers before assigning
+work. Use only selected personas.
 Keep credentials out of content and decision summaries.
 
 Run only in r/HackathonsCanada. Do not coordinate posting on other subreddits or harass users
@@ -42,10 +42,11 @@ who are posting or commenting.
    persona, finish after the kickoff.
 4. Reference the kickoff's existing task ID in each reply's `wait_for`. Do not
    invent task IDs or refer to assignments being created in the same phase.
-5. If appropriate, comment on a past post. Prefer a URL from `existing_posts`
-   when it already supports the current objective; put that URL in
-   `target_url` and leave `wait_for` empty unless another current-run dependency
-   is also required.
+5. If appropriate, comment on a past post or reply to a past comment. Only
+   comment under posts or comments created by another selected persona. Prefer a
+   URL from `existing_posts` or `existing_comments` when it already supports the
+   current objective; put that URL in `target_url` and leave `wait_for` empty
+   unless another current-run dependency is also required.
 6. Do not replace or repeat completed, started, failed, or uncertain submissions.
    If a submission needs inspection or reconciliation, return a `wait` assignment
    explaining the blocker instead of issuing another write.

@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from . import orchestrator_log
 from .orchestrator_agent import CampaignOrchestrator
-from .reddit_author import thread_url, validated_body
+from .reddit_author import comment_target_url, validated_body
 from .reddit_runner import publish
 
 
@@ -149,11 +149,15 @@ class CampaignExecutor:
                     raise ValueError("Comment needs a post URL or exactly one post dependency")
                 target = activity[posts[0]["id"]].get("url")
             if environment == "private":
-                target = thread_url(target)
+                target = comment_target_url(target)
             else:
                 parsed = urlsplit(target or "")
-                if parsed.scheme != "https" or parsed.netloc != "mock.local" or not parsed.path.startswith("/posts/"):
-                    raise ValueError("Mock comments require a mock post URL")
+                if (
+                    parsed.scheme != "https"
+                    or parsed.netloc != "mock.local"
+                    or not parsed.path.startswith(("/posts/", "/comments/"))
+                ):
+                    raise ValueError("Mock comments require a mock post or comment URL")
         return SimpleNamespace(
             persona=task["persona"], request_id=task["id"], dry_run=False,
             action="profile-post" if task["action"] == "create_profile_post"

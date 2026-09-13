@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  BookOpen,
   Compass,
   LayoutGrid,
   Radar,
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
   { href: "/logs", label: "Logs", icon: ScrollText },
+  { href: "/library", label: "Library", icon: BookOpen },
   { href: "/opportunities", label: "Opportunities", icon: Compass },
   { href: "/discoverability", label: "Discoverability", icon: Radar },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
