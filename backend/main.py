@@ -70,6 +70,10 @@ async def launch(req: LaunchRequest):
         subreddits = None
         queries = req.queries
         chosen = orchestrator.resolve_personas(req.count, req.personas)
+        launch_count = min(req.count, max(0, config.MAX_AGENTS - orchestrator.live_count()))
+        bound_browser_count = sum(
+            persona.browsing_mode == "reddit_browse" for persona in chosen[:launch_count]
+        )
         prompt = req.prompt.strip() or "\n".join(req.queries).strip()
         profile_posts = None
         if req.mode == "profile_post":
@@ -79,11 +83,34 @@ async def launch(req: LaunchRequest):
                 raise ValueError("profile_post count exceeds the configured persona pool")
             if req.count > config.MAX_AGENTS - orchestrator.live_count():
                 raise RuntimeError("not enough available agent slots for the profile-post batch")
+            shared_subreddits = await select_subreddits(
+                prompt, browser_count=len(chosen),
+            )
             profile_posts = await profile_post_orchestrator.plan(
                 prompt, [persona.name for persona in chosen],
+                excluded_subreddits=shared_subreddits,
             )
-        elif prompt and any(persona.browsing_mode == "reddit_browse" for persona in chosen):
-            subreddits = await select_subreddits(prompt)
+        else:
+            automatic_posters = [
+                persona.name for persona in chosen[:launch_count]
+                if persona.name == "Yusuf"
+            ] if prompt else []
+            if automatic_posters:
+                posting_prompt = (
+                    f"Topic: {prompt}\n\n"
+                    "Write about the user's startup as a solution to the compute shortage. "
+                    "Use only startup details present in the topic."
+                )
+                profile_posts = await profile_post_orchestrator.plan(
+                    posting_prompt, automatic_posters,
+                )
+                for post in profile_posts.values():
+                    post["warmup_seconds"] = 2.0
+                bound_browser_count -= len(automatic_posters)
+            if prompt and bound_browser_count:
+                subreddits = await select_subreddits(
+                    prompt, browser_count=bound_browser_count,
+                )
         if req.prompt.strip():
             queries = [prompt]
         return {"agents": orchestrator.launch(

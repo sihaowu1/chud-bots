@@ -8,7 +8,7 @@ from backend.main import LaunchRequest, launch
 
 
 BOUND = {'Yusuf', 'Cobb', 'Arthur', 'Ariadne', 'Generic 1', 'Generic 2', 'Generic 3', 'Generic 4'}
-ROUTE = ('python', 'coding', 'programming', 'learnpython', 'technology')
+ROUTE = ('python', 'coding', 'programming')
 
 
 class BindingTests(unittest.IsolatedAsyncioTestCase):
@@ -37,7 +37,7 @@ class BindingTests(unittest.IsolatedAsyncioTestCase):
             'backend.main.orchestrator.launch', return_value=[]
         ):
             await launch(LaunchRequest(target='', prompt='Python', personas=['Generic 4']))
-        select.assert_awaited_once_with('Python')
+        select.assert_awaited_once_with('Python', browser_count=1)
 
     async def test_unbound_persona_does_not_select_even_with_browse_request(self):
         with patch('backend.main.select_subreddits', new_callable=AsyncMock) as select, patch(
@@ -52,6 +52,6 @@ class BindingTests(unittest.IsolatedAsyncioTestCase):
                    side_effect=RuntimeError('selection failed')) as select, patch(
                    'backend.agent.steel_client.create_session', new_callable=AsyncMock) as create:
             await agent.run()
-        select.assert_awaited_once_with('Python')
+        select.assert_awaited_once_with('Python', browser_count=1)
         create.assert_not_awaited()
         self.assertEqual(agent.state.status, 'failed')

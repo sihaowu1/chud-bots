@@ -45,6 +45,42 @@ class LaunchRequestTests(unittest.TestCase):
 
 
 class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_topic_launch_makes_yusuf_the_automatic_profile_poster(self):
+        request = LaunchRequest(
+            target="https://www.reddit.com", prompt="Acme GPU marketplace", count=2,
+            mode="reddit_browse",
+        )
+        post = {"Yusuf": {"title": "Compute", "body": "Body", "request_id": "one",
+                           "warmup_subreddit": "technology"}}
+        with (
+            patch("backend.main.orchestrator.live_count", return_value=0),
+            patch(
+                "backend.main.orchestrator.resolve_personas",
+                return_value=[
+                    SimpleNamespace(name="Yusuf", browsing_mode="reddit_browse"),
+                    SimpleNamespace(name="Cobb", browsing_mode="reddit_browse"),
+                ],
+            ),
+            patch(
+                "backend.main.profile_post_orchestrator.plan",
+                new=AsyncMock(return_value=post),
+            ) as planner,
+            patch(
+                "backend.main.select_subreddits",
+                new=AsyncMock(return_value=("startups", "technology", "computing")),
+            ) as route_planner,
+            patch("backend.main.orchestrator.launch", return_value=[{"id": "a"}]) as start,
+        ):
+            await launch(request)
+
+        planner_prompt = planner.await_args.args[0]
+        self.assertIn("Acme GPU marketplace", planner_prompt)
+        self.assertIn("compute shortage", planner_prompt)
+        planner.assert_awaited_once_with(planner_prompt, ["Yusuf"])
+        route_planner.assert_awaited_once_with("Acme GPU marketplace", browser_count=1)
+        self.assertEqual(post["Yusuf"]["warmup_seconds"], 2.0)
+        self.assertEqual(start.call_args.kwargs["profile_posts"], post)
+
     async def test_plans_once_then_launches_every_agent_with_its_post(self):
         request = LaunchRequest(
             target="https://www.reddit.com",
@@ -53,8 +89,10 @@ class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
             mode="profile_post",
         )
         posts = {
-            "Cobb": {"title": "One", "body": "Body", "request_id": "one"},
-            "Arthur": {"title": "Two", "body": "Body", "request_id": "two"},
+            "Cobb": {"title": "One", "body": "Body", "request_id": "one",
+                     "warmup_subreddit": "technology"},
+            "Arthur": {"title": "Two", "body": "Body", "request_id": "two",
+                       "warmup_subreddit": "programming"},
         }
         with (
             patch("backend.main.orchestrator.live_count", return_value=0),
@@ -69,11 +107,19 @@ class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
                 "backend.main.profile_post_orchestrator.plan",
                 new=AsyncMock(return_value=posts),
             ) as planner,
+            patch(
+                "backend.main.select_subreddits",
+                new=AsyncMock(return_value=("python", "learnpython", "coding")),
+            ) as route_planner,
             patch("backend.main.orchestrator.launch", return_value=[{"id": "a"}, {"id": "b"}]) as start,
         ):
             result = await launch(request)
 
-        planner.assert_awaited_once_with("launch topic", ["Cobb", "Arthur"])
+        route_planner.assert_awaited_once_with("launch topic", browser_count=2)
+        planner.assert_awaited_once_with(
+            "launch topic", ["Cobb", "Arthur"],
+            excluded_subreddits=("python", "learnpython", "coding"),
+        )
         start.assert_called_once_with(
             "https://www.reddit.com", ["launch topic"], 2,
             mode="profile_post", selected_personas=None,

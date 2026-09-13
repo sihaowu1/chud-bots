@@ -57,6 +57,10 @@ function diffToLogs(
         persona: a.persona,
         level: a.level,
         msg: a.note,
+        url:
+          a.url && a.note.toLowerCase().includes("post confirmed")
+            ? a.url
+            : undefined,
         error: a.status === "failed",
       });
     }
@@ -156,7 +160,7 @@ export const useSessions = create<SessionState>((set) => ({
     const r = await fetch(`${BACKEND}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, mode: "profile_post" }),
+      body: JSON.stringify({ ...body, mode: "reddit_browse" }),
     });
     if (!r.ok)
       throw new Error(

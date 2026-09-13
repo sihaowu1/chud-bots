@@ -83,6 +83,18 @@ function SessionCardInner({
             <StatusDot tone={STATUS_TONE[a.status]} pulse={running} size="xs" />
             {running ? STAGE_LABEL[stage] : STATUS_LABEL[a.status]}
           </span>
+          {a.session?.viewer_url && (
+            <a
+              href={a.session.viewer_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              aria-label={`Open ${a.persona}'s session in Steel`}
+            >
+              Steel
+              <ArrowUpRight className="size-3" />
+            </a>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -201,22 +213,6 @@ function SessionCardInner({
             )}
           </span>
           <span className="flex shrink-0 items-center gap-0.5">
-            {a.session?.viewer_url && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a
-                    href={a.session.viewer_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded p-1 text-fg-subtle hover:bg-foreground/[0.06] hover:text-foreground"
-                    aria-label="Open in Steel"
-                  >
-                    <ArrowUpRight className="size-3.5" />
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent>Open in Steel</TooltipContent>
-              </Tooltip>
-            )}
             {running && (
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -76,11 +76,11 @@ class Dreamer:
                  mode: str = "legacy", profile_post: dict | None = None):
         if mode not in ("legacy", "reddit_browse", "profile_post"):
             raise ValueError("unknown dreamer mode")
-        if (mode == "profile_post") != (profile_post is not None):
-            raise ValueError("profile_post content is required only in profile_post mode")
+        if mode == "profile_post" and profile_post is None:
+            raise ValueError("profile_post mode requires profile post content")
         # Profile posting is an explicit batch action. Otherwise behavior stays
         # bound to the persona, independent of the launch-wide browsing hint.
-        self.mode = "profile_post" if mode == "profile_post" else persona.browsing_mode
+        self.mode = "profile_post" if profile_post is not None else persona.browsing_mode
         self.profile_post = profile_post
         self.browse_subreddits: tuple[str, ...] | None = None
         self.persona = persona
@@ -119,8 +119,8 @@ class Dreamer:
             self._check_stop()
             if self.mode == "reddit_browse" and self.browse_subreddits is None and self.state.query.strip():
                 from .subreddit_selector import select_subreddits
-                self._emit(0, "selecting five subreddits for the topic")
-                self.browse_subreddits = await select_subreddits(self.state.query)
+                self._emit(0, "selecting three subreddits for the topic")
+                self.browse_subreddits = await select_subreddits(self.state.query, browser_count=1)
                 self._check_stop()
             self._emit(0, "waking up a Steel session")
             session = await steel_client.create_session(persona=self.persona.name, interactive=True)
@@ -483,10 +483,23 @@ class Dreamer:
             await browse_reddit(self, page)
             return
         if self.mode == "profile_post":
+            from .reddit_browser import RedditBrowser
             from .reddit_author import RedditAuthor
 
             post = self.profile_post
             assert post is not None
+            subreddit = post["warmup_subreddit"]
+            listing = f"{REDDIT_HOME_URL}r/{subreddit}/new/"
+            await RedditBrowser(self, page)._open(
+                listing, f"warming up in r/{subreddit} before posting",
+            )
+            await page.mouse.wheel(0, random.randint(240, 640))
+            warmup_seconds = post.get("warmup_seconds")
+            if warmup_seconds is None:
+                warmup_seconds = random.uniform(2, 5)
+            self._emit(2, f"browsing r/{subreddit} for {warmup_seconds:.1f} seconds", page.url)
+            await asyncio.sleep(warmup_seconds)
+            self._check_stop()
             self._emit(1, f'preparing profile post for "{self.state.query}"', page.url)
             result = await RedditAuthor(self, page).create_profile_post(
                 post["title"], post["body"], request_id=post["request_id"],

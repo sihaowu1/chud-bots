@@ -35,6 +35,7 @@ export interface SessionLogLine {
   persona?: string;
   level?: number;
   msg: string;
+  url?: string;
   error?: boolean;
 }
 

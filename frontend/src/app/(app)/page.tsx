@@ -4,9 +4,8 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { useSim } from "@/lib/store";
 import { useNow } from "@/hooks/use-now";
-import { duration, clock } from "@/lib/format";
+import { clock } from "@/lib/format";
 import { PageHeader } from "@/components/shared/page-header";
-import { LiveIndicator } from "@/components/shared/live-indicator";
 import { SectionHeader } from "@/components/shared/section";
 import { CampaignSummary } from "@/components/dashboard/campaign-summary";
 import { AgentsDeployed } from "@/components/dashboard/agents-deployed";
@@ -26,18 +25,12 @@ export default function DashboardPage() {
           <>
             {campaign.name} ·{" "}
             {campaign.status === "running" ? "Running" : "Paused"}
-            {hydrated && campaign.status === "running" && (
-              <> for {duration(now - campaign.startedAt)}</>
-            )}
           </>
         }
         actions={
-          <>
-            <LiveIndicator />
-            <span className="font-mono text-xs text-fg-subtle tnum">
-              {hydrated ? clock(now) : "--:--:--"}
-            </span>
-          </>
+          <span className="font-mono text-xs text-fg-subtle tnum">
+            {hydrated ? clock(now) : "--:--:--"}
+          </span>
         }
       />
 

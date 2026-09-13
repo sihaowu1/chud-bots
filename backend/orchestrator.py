@@ -39,7 +39,9 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
         if profile_posts is None or set(profile_posts) != expected:
             raise ValueError("profile_post mode requires one post for every selected persona")
     elif profile_posts is not None:
-        raise ValueError("profile posts are only valid in profile_post mode")
+        selected = {persona.name for persona in chosen}
+        if not profile_posts or not set(profile_posts) <= selected:
+            raise ValueError("profile posts must belong to selected personas")
     room = config.MAX_AGENTS - live_count()
     if mode == "profile_post" and count > room:
         raise RuntimeError("not enough available agent slots for the profile-post batch")
@@ -55,7 +57,7 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
     for persona in chosen[:count]:
         d = Dreamer(
             persona, next(query_cycle), target, mode=mode,
-            profile_post=profile_posts[persona.name] if profile_posts else None,
+            profile_post=profile_posts.get(persona.name) if profile_posts else None,
         )
         if d.mode == "reddit_browse":
             d.browse_subreddits = subreddits
@@ -64,9 +66,10 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
         launched.append(d.state.snapshot())
         events.publish("agent", agent=d.state.snapshot())
     browsing = sum(item["mode"] == "reddit_browse" for item in launched)
+    posting = sum(item["mode"] == "profile_post" for item in launched)
+    legacy = count - browsing - posting
     description = (
-        "posting to their profiles" if mode == "profile_post" else
-        f"with persona bindings ({browsing} subreddit browsers, {count - browsing} legacy)"
+        f"({posting} profile posters, {browsing} subreddit browsers, {legacy} legacy)"
     )
     events.publish("log", msg=f"launched {count} dreamer(s) {description}")
     return launched

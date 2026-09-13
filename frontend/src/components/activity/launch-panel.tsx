@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSessions } from "@/lib/sessions/store";
 import { toast } from "@/components/shared/toast";
 
-/** Mirrors the backend's LaunchRequest: target, queries[], count. */
+/** Launches the backend's Reddit browsing flow, with Yusuf as the profile poster. */
 export function LaunchPanel() {
   const launch = useSessions((s) => s.launch);
   const stopAll = useSessions((s) => s.stopAll);
@@ -20,7 +20,7 @@ export function LaunchPanel() {
   );
 
   const [count, setCount] = useState(3);
-  const [prompt, setPrompt] = useState("Inception won Battle of the Schools");
+  const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -35,7 +35,7 @@ export function LaunchPanel() {
       });
       toast({
         title: `${count} agent${count === 1 ? "" : "s"} launched`,
-        description: "Creating one targeted post on each agent profile",
+        description: "Starting Reddit browsing and Yusuf's profile-post flow",
       });
     } catch (err) {
       toast({
@@ -50,8 +50,9 @@ export function LaunchPanel() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        The orchestrator drafts distinct copy from your query. Every launched
-        agent posts once to its own Reddit profile.
+        Agents use your query to explore relevant Reddit communities. Yusuf
+        publishes one generated post to his own profile; all other agents only
+        browse and do not post, comment, or vote.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="profile-query" className="text-xs font-normal text-muted-foreground">
@@ -59,7 +60,7 @@ export function LaunchPanel() {
         </Label>
         <Textarea id="profile-query" value={prompt}
           onChange={(e) => setPrompt(e.target.value)} required maxLength={500}
-          placeholder="What should every agent post about?" rows={3}
+          placeholder="What should the agents browse for?" rows={3}
           className="font-mono text-xs" />
       </div>
       <div className="flex items-end gap-3">
@@ -86,7 +87,7 @@ export function LaunchPanel() {
           ) : (
             <Play data-icon="inline-start" />
           )}
-          {busy ? "Planning posts…" : "Launch"}
+          {busy ? "Planning routes…" : "Launch"}
         </Button>
       </div>
       <div className="flex items-center gap-1.5 border-t border-border pt-3">

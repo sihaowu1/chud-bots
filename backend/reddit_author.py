@@ -205,7 +205,12 @@ class RedditAuthor:
         agent_state_store.append_activity(self.dreamer.persona.name, {
             **receipt["payload"], **result, "status": "completed",
         }, reddit_username=username)
-        self.dreamer._emit(3, "Reddit submission confirmed", result["url"])
+        submission = (
+            "post"
+            if receipt["payload"]["action"] in {"create_post", "create_profile_post"}
+            else "comment"
+        )
+        self.dreamer._emit(3, f"Reddit {submission} confirmed", result["url"])
 
     async def _submit(self, path: Path, payload: dict, username: str, button, verify) -> dict:
         self.dreamer._check_stop()

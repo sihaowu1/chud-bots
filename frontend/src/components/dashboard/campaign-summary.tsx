@@ -53,16 +53,6 @@ export function CampaignSummary({ className }: { className?: string }) {
           “{c.description}”
         </p>
 
-        <div className="mt-4 border-t border-border pt-4">
-          <div className="label-xs">Target search intent</div>
-          <ul className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
-            {c.searchIntent.map((q) => (
-              <li key={q} className="font-mono text-xs text-foreground">
-                “{q}”
-              </li>
-            ))}
-          </ul>
-        </div>
       </div>
     </Panel>
   );

@@ -34,6 +34,16 @@ export function SessionLog({ className }: { className?: string }) {
               </span>
             )}
             {l.msg}
+            {l.url && (
+              <a
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-1.5 text-signal hover:underline"
+              >
+                View post
+              </a>
+            )}
           </span>
         </li>
       ))}

@@ -19,23 +19,33 @@ summarization.
 
 ### Current implementation
 
-Browsing behavior is bound in `Persona.browsing_mode`: Yusuf, Cobb, Arthur,
-Ariadne, and Generic 1–4 always use the read-only subreddit tour. Eames, Saito,
+Browsing behavior is bound in `Persona.browsing_mode`: Cobb, Arthur,
+Ariadne, and Generic 1–4 use the read-only subreddit tour. When a topic launch
+includes Yusuf, `gpt-5.4-mini` assigns him a relevant warm-up subreddit and writes
+a profile post framing the user's startup as a solution to the compute shortage.
+Yusuf scrolls that subreddit and dwells for two seconds before publishing. Eames, Saito,
 Mal, and Generic 5–8 retain the legacy flow. A launch-wide `mode` cannot override
-these bindings. Pool order remains seven named personas followed by eight generic
-personas; launch all 15 to include all eight bound browsers, or select names explicitly.
-The API selects five subreddits once when a topic is supplied and any selected
-persona is bound, sharing that route only with bound browsers. Direct Dreamer
+these bindings except for Yusuf's automatic topic-post assignment. Pool order remains
+seven named personas followed by eight generic personas.
+The API counts the bound personas that can launch, then selects three subreddits
+once when a topic is supplied and at least one selected persona is bound. It
+shares that route only with bound browsers. Direct Dreamer
 runs select from their query before opening Steel. With no topic, bound personas
 use the default hackathon/technology tour. Standalone login/author adapter helpers
 remain explicit operations outside the Dreamer browsing lifecycle.
 
-The Activity page launches a read-only Reddit tour using `backend/reddit_patrol.py`,
-without the campaign coordinator or signup/login flow. The user enters a topic;
+The Activity page launches a Reddit tour using `backend/reddit_patrol.py`, without
+the campaign coordinator or signup/login flow. When Yusuf is selected for a topic
+launch, he instead performs the automatic warm-up and profile-post flow described
+above. The user enters a topic;
 `backend/subreddit_selector.py` calls `gpt-5.4-mini` with low reasoning once per
-launch to choose exactly five distinct subreddit names, shared by launched
+launch to choose exactly three distinct subreddit names, shared by launched
 bound personas. This requires `OPENAI_API_KEY` and uses `OPENAI_BASE_URL`. Invalid or
 failed model responses reject the launch before opening Steel sessions.
+Profile-post launches reuse those three communities as exclusions. The
+`gpt-5.4-mini` profile-post orchestrator assigns each posting persona one additional,
+mutually distinct warm-up subreddit, which the agent opens and browses for a random
+2–5 seconds before it starts its profile post.
 Only the destinations vary; the browsing choreography remains fixed.
 `browsing_plan(persona_name)` still supplies the fixed behavior for any persona;
 its default hackathon/technology route is used when no topic is supplied.
