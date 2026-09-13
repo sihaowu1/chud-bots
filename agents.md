@@ -123,8 +123,8 @@ uv run uvicorn backend.main:app --reload
 Open http://127.0.0.1:8000. No local Chromium is needed: Playwright connects
 to Steel's browser over CDP, so `playwright install` is not required.
 
-Login debugging is temporarily limited to one dreamer, Yusuf, in both the UI
-and launch API. Login uses the saved email address and password.
+A launch runs 1-8 dreamers (`MAX_AGENTS`, capped at 8). Login uses the saved
+email address and password.
 It opens Reddit's home page and clicks Log In before entering credentials.
 Login succeeds only when Reddit's home page is loaded and `/api/me.json`
 confirms a signed-in identity. The login-only 10-second hold starts then;

@@ -5,9 +5,10 @@ from backend.main import LaunchRequest
 
 
 class LaunchRequestTests(unittest.TestCase):
-    def test_multiple_dreamers_are_disabled_during_yusuf_login_testing(self):
+    def test_dreamer_count_is_capped_at_eight(self):
+        self.assertEqual(LaunchRequest(target="https://www.reddit.com", count=8).count, 8)
         with self.assertRaises(ValidationError):
-            LaunchRequest(target="https://www.reddit.com", count=2)
+            LaunchRequest(target="https://www.reddit.com", count=9)
 
     def test_queries_can_be_empty(self):
         request = LaunchRequest(target="https://www.reddit.com", queries=[], count=1)

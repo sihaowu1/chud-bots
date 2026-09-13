@@ -1,5 +1,8 @@
-"""The three presence probes behind the discoverability page, and the loop that runs
-them on a timer inside the backend server.
+"""The presence probes behind the discoverability page, and the loop that runs them on a
+timer inside the backend server.
+
+Search and Reddit presence come from one Google probe per query (see prober.py); AI
+answer presence is a separate, optional API call.
 
 Nothing here writes a sample for a probe that didn't measure anything. A blocked,
 errored, skipped, or disabled probe is missing data, not a zero.
@@ -35,44 +38,32 @@ def _ai_budget_ok() -> bool:
     return _ai_calls_today < config.AI_PROBE_MAX_CALLS_PER_DAY
 
 
-async def probe_search(query: str, target: str) -> dict:
-    result = await prober.probe_guarded(query, target, depth_pages=config.PROBE_DEPTH_PAGES)
+async def probe_search_and_reddit(query: str, campaign: dict) -> tuple[dict, dict]:
+    """One Google probe, split into the search and Reddit surface results."""
+    result = await prober.probe_guarded(
+        query, campaign["url"], campaign["name"], depth_pages=config.PROBE_DEPTH_PAGES
+    )
     if result["status"] != "done":
-        return {"surface": "search", "measured": False, "status": result["status"]}
-    position = result["position"]
-    return {
+        missed = {"measured": False, "status": result["status"]}
+        return {"surface": "search", **missed}, {"surface": "reddit", **missed}
+
+    search = {
         "surface": "search", "measured": True,
-        "presence": rank_metrics.visibility(position) / 100.0,
-        "position": position, "raw": {"pages_fetched": result["pages_fetched"]},
+        "presence": rank_metrics.visibility(result["position"]) / 100.0,
+        "position": result["position"], "raw": {"pages_fetched": result["pages_fetched"]},
     }
-
-
-async def probe_reddit(query: str, entity_name: str) -> dict:
-    """Keyless Reddit search: is the entity named in the top results' titles/selftext?
-    Only detected (1.0) or not (0.0) - the design doc's "0.5 if only in comments" tier
-    needs a second call per post and isn't implemented."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://www.reddit.com/search.json",
-                params={"q": query, "limit": 25, "sort": "new"},
-                headers={"User-Agent": "inception-discoverability-probe/1.0"},
-            )
-            resp.raise_for_status()
-            posts = resp.json()["data"]["children"]
-    except Exception as exc:  # noqa: BLE001 - a network failure is a skip, not a crash
-        return {"surface": "reddit", "measured": False, "status": "error", "detail": str(exc)[:200]}
-
-    name = entity_name.lower()
-    hits = [
-        p["data"]["permalink"] for p in posts
-        if name in (p["data"].get("title", "") + " " + p["data"].get("selftext", "")).lower()
-    ]
-    return {
-        "surface": "reddit", "measured": True,
-        "presence": 1.0 if hits else 0.0,
-        "raw": {"checked": len(posts), "hits": hits[:5]},
-    }
+    mentions = result["reddit"]
+    if mentions["status"] != "done":
+        reddit = {"surface": "reddit", "measured": False, "status": mentions["status"]}
+    else:
+        # Named in any Reddit result Google surfaces -> 1.0. The design doc's "0.5 if only
+        # in comments" tier needs the thread itself and isn't implemented.
+        reddit = {
+            "surface": "reddit", "measured": True,
+            "presence": 1.0 if mentions["hits"] else 0.0,
+            "raw": {"checked": mentions["checked"], "hits": mentions["hits"][:5]},
+        }
+    return search, reddit
 
 
 _AI_PROMPT = (
@@ -115,12 +106,11 @@ async def probe_ai(query: str, entity_name: str) -> dict:
 
 
 async def probe_query(campaign: dict, query: str) -> None:
-    results = await asyncio.gather(
-        probe_search(query, campaign["url"]),
-        probe_reddit(query, campaign["name"]),
+    (search, reddit), ai = await asyncio.gather(
+        probe_search_and_reddit(query, campaign),
         probe_ai(query, campaign["name"]),
     )
-    for result in results:
+    for result in (search, reddit, ai):
         if not result["measured"]:
             log.info("visibility %s probe for %r did not measure: %s",
                      result["surface"], query, result.get("status"))

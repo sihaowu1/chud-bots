@@ -45,7 +45,7 @@ samples is `null` in the series, and the day's score uses only the measured surf
 | `db.py` / `schema.sql` | sqlite: `campaigns` singleton (entity + tracked queries, seeded from `seed/campaign.json`) and `visibility_samples` |
 | `schema.py` | response models, camelCase aliases |
 | `visibility.py` | the probe loop: search / Reddit / AI on `VISIBILITY_INTERVAL_S` |
-| `prober.py` | reads a Google SERP for the campaign's organic rank |
+| `prober.py` | one Steel session per query: the campaign's organic Google rank, then Reddit mentions via `site:reddit.com` |
 | `metrics.py` | rank → presence (CTR curve) and domain matching |
 
 ## Settings (repo `.env`, listed in `.env.example`)
@@ -62,8 +62,20 @@ samples is `null` in the series, and the day's score uses only the measured surf
   spend a session per save. Set `VISIBILITY_INTERVAL_S=0` to turn probing off.
 - **A probe that didn't measure writes nothing.** Blocked, skipped, errored and disabled
   probes are missing data.
-- **Reddit's keyless `search.json` returned 403 from every request in development**,
-  regardless of User-Agent — likely an IP block on cloud ranges. Community Presence stays
-  unmeasured until a proxy or Reddit OAuth is used.
+- **A block wall can take up to 40s to clear before it's real.** Steel's auto-captcha-
+  solving handles Google's `/sorry/` interstitial in the background - confirmed live at
+  ~15s for a plain reCAPTCHA - and Google then redirects the page on by itself. Checking
+  once right after `domcontentloaded` (the original approach) caught the wall mid-solve
+  and called a temporary state a permanent block; `_wait_for_unblock` polls for up to
+  `UNBLOCK_TIMEOUT_S` (40s) before giving up for real. Repeated rapid probing from the
+  same session escalates how often Google walls it at all - don't loop probes tightly
+  while developing against live Google.
+- **Reddit presence is measured through Google, not Reddit.** After ranking the query, the
+  same Steel session loads `site:reddit.com <query>` and checks reddit.com results' titles
+  and snippets for the campaign name or domain. Reddit's keyless search is IP-blocked and
+  its API needs credentials, so this measures the Reddit discussion Google surfaces — what
+  an AI Overview draws on — not every thread, and nothing beyond the snippet. A walled
+  Reddit page keeps the ranking and leaves Reddit unmeasured; Google's no-results notice
+  counts as a measured zero.
 - **The AI probe is untested against a live key.** The disabled path and daily cap are
   covered; the Messages API call itself is not.

@@ -70,6 +70,16 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.goto(FIXTURE.as_uri())
         self.assertIsNone(await looks_blocked(self.page))
 
+    async def test_snippet_is_result_text_without_its_title(self):
+        await self.page.set_content(
+            '<div id="search"><div id="rso"><div class="MjjYud"><div class="g">'
+            '<a href="https://www.reddit.com/r/x/1"><h3>Best tools?</h3></a>'
+            "<span>I switched to   FlowPilot for this.</span></div></div></div></div>"
+        )
+        (row,) = await self.page.evaluate(_EXTRACT_JS)
+        self.assertEqual(row["title"], "Best tools?")
+        self.assertEqual(row["snippet"], "I switched to FlowPilot for this.")
+
     async def test_page_without_results_container_yields_none(self):
         await self.page.set_content("<html><body><p>nothing here</p></body></html>")
         self.assertIsNone(await self.page.evaluate(_EXTRACT_JS))
