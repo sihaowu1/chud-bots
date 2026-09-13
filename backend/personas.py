@@ -28,7 +28,7 @@ _POOL = [
     Persona("Eames", False, (70, 160), 1, (2, 3), ["skimmer", "desktop"]),
     Persona("Saito", False, (110, 220), 2, (3, 5), ["deliberate", "desktop"]),
     Persona("Mal", False, (50, 120), 4, (4, 7), ["deep diver", "desktop"]),
-    Persona("Fischer", False, (100, 210), 1, (2, 4), ["desktop", "skimmer"]),
+    # Persona("Fischer", False, (100, 210), 1, (2, 4), ["desktop", "skimmer"]),
 ]
 
 
