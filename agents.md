@@ -19,6 +19,43 @@ summarization.
 
 ### Current implementation
 
+Browsing behavior is bound in `Persona.browsing_mode`: Yusuf, Cobb, Arthur,
+Ariadne, and Generic 1–4 always use the read-only subreddit tour. Eames, Saito,
+Mal, and Generic 5–8 retain the legacy flow. A launch-wide `mode` cannot override
+these bindings. Pool order remains seven named personas followed by eight generic
+personas; launch all 15 to include all eight bound browsers, or select names explicitly.
+The API selects five subreddits once when a topic is supplied and any selected
+persona is bound, sharing that route only with bound browsers. Direct Dreamer
+runs select from their query before opening Steel. With no topic, bound personas
+use the default hackathon/technology tour. Standalone login/author adapter helpers
+remain explicit operations outside the Dreamer browsing lifecycle.
+
+The Activity page launches a read-only Reddit tour using `backend/reddit_patrol.py`,
+without the campaign coordinator or signup/login flow. The user enters a topic;
+`backend/subreddit_selector.py` calls `gpt-5.4-mini` with low reasoning once per
+launch to choose exactly five distinct subreddit names, shared by launched
+bound personas. This requires `OPENAI_API_KEY` and uses `OPENAI_BASE_URL`. Invalid or
+failed model responses reject the launch before opening Steel sessions.
+Only the destinations vary; the browsing choreography remains fixed.
+`browsing_plan(persona_name)` still supplies the fixed behavior for any persona;
+its default hackathon/technology route is used when no topic is supplied.
+For each new-post feed, scroll 480/640/480 pixels, select the first two unique
+same-community post links in document order, open each, pause six seconds on
+the body, scroll visible comments 420/540/540 pixels, pause four seconds, then
+return to the listing. Scroll pauses are two seconds. No votes or submissions.
+The post-selection rules repeat; model-selected communities, live posts, load
+times and availability can change. Model suggestions are not verified for existence
+in advance. HTTP failures fail the session; missing posts/comments are reported.
+Progress uses the existing SSE and Steel viewer; sessions release on completion.
+
+Use `POST /api/runs` with `{"target":"https://www.reddit.com",
+"mode":"reddit_browse","prompt":"Python tools","count":1,"personas":["Cobb"]}`
+to choose a persona and topic. Topic selection accepts a nonblank prompt (at most
+2000 characters); `queries` joined with newlines is also accepted when prompt is absent.
+Omit `personas` to use pool order. Both the API and static display honor persona
+bindings regardless of the launch-wide mode hint.
+The separate model-backed publishing CLI remains available.
+
 The code implements the earlier search-traffic prototype and a model-backed
 campaign coordinator. The coordinator reads `ORCHESTRATOR.md` and the durable agent
 ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone

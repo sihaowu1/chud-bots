@@ -1,7 +1,7 @@
 """Fixed, read-only browsing choreography; no model or random decisions."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 from urllib.parse import urljoin, urlsplit
 
@@ -48,6 +48,8 @@ def post_urls(hrefs: list[str], subreddit: str) -> list[str]:
 async def browse_reddit(dreamer, page) -> None:
     """Execute a bounded route in any Dreamer's session and emit live progress."""
     plan = browsing_plan(dreamer.persona.name)
+    if dreamer.browse_subreddits is not None:
+        plan = replace(plan, subreddits=dreamer.browse_subreddits)
     browser = RedditBrowser(dreamer, page)
 
     async def pause(seconds):

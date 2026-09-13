@@ -78,8 +78,11 @@ class Dreamer:
             raise ValueError("unknown dreamer mode")
         if (mode == "profile_post") != (profile_post is not None):
             raise ValueError("profile_post content is required only in profile_post mode")
-        self.mode = mode
+        # Profile posting is an explicit batch action. Otherwise behavior stays
+        # bound to the persona, independent of the launch-wide browsing hint.
+        self.mode = "profile_post" if mode == "profile_post" else persona.browsing_mode
         self.profile_post = profile_post
+        self.browse_subreddits: tuple[str, ...] | None = None
         self.persona = persona
         self.state = AgentState(
             id=uuid.uuid4().hex[:8],
@@ -87,7 +90,7 @@ class Dreamer:
             query=query,
             target=target,
             traits=persona.traits,
-            mode=mode,
+            mode=self.mode,
         )
         self._stop = asyncio.Event()
         self.task: asyncio.Task | None = None
@@ -113,6 +116,12 @@ class Dreamer:
         self.state.status = "running"
         session = None
         try:
+            self._check_stop()
+            if self.mode == "reddit_browse" and self.browse_subreddits is None and self.state.query.strip():
+                from .subreddit_selector import select_subreddits
+                self._emit(0, "selecting five subreddits for the topic")
+                self.browse_subreddits = await select_subreddits(self.state.query)
+                self._check_stop()
             self._emit(0, "waking up a Steel session")
             session = await steel_client.create_session(persona=self.persona.name, interactive=True)
             self.state.session = steel_client.session_summary(session)

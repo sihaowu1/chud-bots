@@ -17,22 +17,23 @@ def snapshot() -> list[dict]:
     return [d.state.snapshot() for d in _agents.values()]
 
 
-def selected_personas(count: int, requested: list[str] | None = None) -> list:
-    pool = {persona.name: persona for persona in personas.pick(len(personas.names()))}
-    if requested is not None:
-        if (len(requested) != count or len(set(requested)) != count
-                or any(name not in pool for name in requested)):
+def resolve_personas(count: int, selected_personas: list[str] | None = None) -> list[personas.Persona]:
+    pool = {p.name: p for p in personas.pick(len(personas.names()))}
+    if selected_personas is not None:
+        if (len(selected_personas) != count or len(set(selected_personas)) != count
+                or any(name not in pool for name in selected_personas)):
             raise ValueError("personas must contain count distinct configured persona names")
-        return [pool[name] for name in requested]
+        return [pool[name] for name in selected_personas]
     return personas.pick(count)
 
 
 def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
-           selected_persona_names: list[str] | None = None,
+           selected_personas: list[str] | None = None,
+           subreddits: tuple[str, ...] | None = None,
            profile_posts: dict[str, dict] | None = None) -> list[dict]:
     if mode not in ("legacy", "reddit_browse", "profile_post"):
         raise ValueError("unknown browsing mode")
-    chosen = selected_personas(count, selected_persona_names)
+    chosen = resolve_personas(count, selected_personas)
     if mode == "profile_post":
         expected = {persona.name for persona in chosen}
         if profile_posts is None or set(profile_posts) != expected:
@@ -56,14 +57,16 @@ def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
             persona, next(query_cycle), target, mode=mode,
             profile_post=profile_posts[persona.name] if profile_posts else None,
         )
+        if d.mode == "reddit_browse":
+            d.browse_subreddits = subreddits
         _agents[d.state.id] = d
         d.task = asyncio.create_task(d.run(), name=f"dreamer-{d.state.id}")
         launched.append(d.state.snapshot())
         events.publish("agent", agent=d.state.snapshot())
+    browsing = sum(item["mode"] == "reddit_browse" for item in launched)
     description = (
         "posting to their profiles" if mode == "profile_post" else
-        "browsing subreddits (read-only)" if mode == "reddit_browse" else
-        f"toward {target}" if normalized_queries else "in login-only mode"
+        f"with persona bindings ({browsing} subreddit browsers, {count - browsing} legacy)"
     )
     events.publish("log", msg=f"launched {count} dreamer(s) {description}")
     return launched

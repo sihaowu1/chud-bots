@@ -24,6 +24,7 @@ interface SessionState {
 
   start: () => () => void;
   launch: (body: {
+    prompt: string;
     target: string;
     queries: string[];
     count: number;

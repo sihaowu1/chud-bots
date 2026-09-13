@@ -43,12 +43,21 @@ class PatrolTests(unittest.IsolatedAsyncioTestCase):
             return_value=BrowsePlan(subreddits=("hackathon",)),
         ), patch("asyncio.sleep", new_callable=AsyncMock):
             await browse_reddit(dreamer, page)
+            first_route = page.goto.call_args_list.copy()
+            first_scrolls = page.mouse.wheel.call_args_list.copy()
+            page.goto.reset_mock()
+            page.mouse.wheel.reset_mock()
+            await dreamer._dream(page)
+        self.assertEqual(page.goto.call_args_list, first_route)
+        self.assertEqual(page.mouse.wheel.call_args_list, first_scrolls)
         listing = "https://www.reddit.com/r/hackathon/new/"
-        self.assertEqual([call.args[0] for call in page.goto.call_args_list], [
+        self.assertEqual([call.args[0] for call in first_route], [
             listing, "https://www.reddit.com/r/hackathon/comments/abc/", listing,
             "https://www.reddit.com/r/hackathon/comments/def/", listing,
         ])
+        self.assertEqual(comments.first.scroll_into_view_if_needed.await_count, 4)
         page.get_by_role.assert_not_called()
+        page.click.assert_not_called()
 
     async def test_stop_prevents_navigation(self):
         dreamer = Dreamer(pick(1)[0], "", "", mode="reddit_browse")
@@ -57,6 +66,14 @@ class PatrolTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(_Stopped):
             await browse_reddit(dreamer, page)
         page.goto.assert_not_awaited()
+
+    def test_browse_api_mode(self):
+        from backend.main import LaunchRequest
+
+        request = LaunchRequest(
+            target="https://www.reddit.com", mode="reddit_browse", personas=["Cobb"],
+        )
+        self.assertEqual(request.mode, "reddit_browse")
 
 
 if __name__ == "__main__":

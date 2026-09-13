@@ -17,14 +17,15 @@ class Persona:
     max_depth: int  # how many internal links to follow after landing
     scroll_passes: tuple[int, int]
     traits: list[str] = field(default_factory=list)
+    browsing_mode: str = "legacy"
 
 
 _POOL = [
     # Yusuf is first temporarily so login runs exercise his saved credentials during testing.
-    Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
-    Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
-    Persona("Arthur", False, (40, 90), 2, (2, 4), ["fast typist", "desktop"]),
-    Persona("Ariadne", False, (90, 200), 3, (4, 8), ["desktop", "scroller"]),
+    Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"], browsing_mode="reddit_browse"),
+    Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"], browsing_mode="reddit_browse"),
+    Persona("Arthur", False, (40, 90), 2, (2, 4), ["fast typist", "desktop"], browsing_mode="reddit_browse"),
+    Persona("Ariadne", False, (90, 200), 3, (4, 8), ["desktop", "scroller"], browsing_mode="reddit_browse"),
     Persona("Eames", False, (70, 160), 1, (2, 3), ["skimmer", "desktop"]),
     Persona("Saito", False, (110, 220), 2, (3, 5), ["deliberate", "desktop"]),
     Persona("Mal", False, (50, 120), 4, (4, 7), ["deep diver", "desktop"]),
@@ -36,6 +37,7 @@ _POOL = [
             2,
             (3, 5),
             ["generic", "desktop"],
+            browsing_mode="reddit_browse" if index <= 4 else "legacy",
         )
         for index in range(1, 9)
     ],

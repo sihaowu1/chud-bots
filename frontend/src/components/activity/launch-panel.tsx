@@ -5,6 +5,7 @@ import { Loader2, Play, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useSessions } from "@/lib/sessions/store";
 import { toast } from "@/components/shared/toast";
 
@@ -18,8 +19,8 @@ export function LaunchPanel() {
     (s) => s.agents.filter((a) => a.status === "running").length,
   );
 
-  const [query, setQuery] = useState("Inception won Battle of the Schools");
   const [count, setCount] = useState(3);
+  const [prompt, setPrompt] = useState("Inception won Battle of the Schools");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -27,8 +28,9 @@ export function LaunchPanel() {
     setBusy(true);
     try {
       await launch({
+        prompt: prompt.trim(),
         target: "https://www.reddit.com",
-        queries: [query.trim()],
+        queries: [],
         count,
       });
       toast({
@@ -47,26 +49,18 @@ export function LaunchPanel() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        The orchestrator drafts distinct copy from your query. Every launched
+        agent posts once to its own Reddit profile.
+      </p>
       <div className="space-y-1.5">
-        <Label
-          htmlFor="query"
-          className="text-xs font-normal text-muted-foreground"
-        >
+        <Label htmlFor="profile-query" className="text-xs font-normal text-muted-foreground">
           Query
         </Label>
-        <Input
-          id="query"
-          required
-          maxLength={500}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="What should every agent post about?"
-          className="h-8 font-mono text-xs"
-        />
-        <p className="text-[11px] text-fg-subtle">
-          The orchestrator drafts distinct copy from this topic. Every launched
-          agent posts once to its own Reddit profile.
-        </p>
+        <Textarea id="profile-query" value={prompt}
+          onChange={(e) => setPrompt(e.target.value)} required maxLength={500}
+          placeholder="What should every agent post about?" rows={3}
+          className="font-mono text-xs" />
       </div>
       <div className="flex items-end gap-3">
         <div className="space-y-1.5">
@@ -80,19 +74,19 @@ export function LaunchPanel() {
             id="count"
             type="number"
             min={1}
-            max={Math.min(max || 7, 7)}
+            max={Math.min(max || 15, 15)}
             value={count}
             onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
             className="h-8 w-20 font-mono text-xs"
           />
         </div>
-        <Button type="submit" size="sm" disabled={busy} className="h-8">
+        <Button type="submit" size="sm" disabled={busy || !prompt.trim()} className="h-8">
           {busy ? (
             <Loader2 data-icon="inline-start" className="animate-spin" />
           ) : (
             <Play data-icon="inline-start" />
           )}
-          Launch
+          {busy ? "Planning posts…" : "Launch"}
         </Button>
       </div>
       <div className="flex items-center gap-1.5 border-t border-border pt-3">

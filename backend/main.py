@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config, events, orchestrator, personas, steel_client
+from .subreddit_selector import select_subreddits
 from .orchestrator_agent import (
     CampaignOrchestrator,
     OrchestratorConfigurationError,
@@ -33,6 +34,7 @@ profile_post_orchestrator = ProfilePostOrchestrator()
 
 
 class LaunchRequest(BaseModel):
+    prompt: str = Field("", max_length=2000)
     mode: Literal["legacy", "reddit_browse", "profile_post"] = "legacy"
     personas: list[str] | None = None
     target: str = Field(..., description="URL of the site to plant in search")
@@ -65,21 +67,29 @@ class ActivityRequest(BaseModel):
 @app.post("/api/runs")
 async def launch(req: LaunchRequest):
     try:
+        subreddits = None
+        queries = req.queries
+        chosen = orchestrator.resolve_personas(req.count, req.personas)
+        prompt = req.prompt.strip() or "\n".join(req.queries).strip()
         profile_posts = None
         if req.mode == "profile_post":
-            if len(req.queries) != 1 or not req.queries[0].strip():
-                raise ValueError("profile_post mode requires exactly one non-empty query")
+            if not prompt:
+                raise ValueError("profile_post mode requires a non-empty query")
             if req.count > len(personas.names()):
                 raise ValueError("profile_post count exceeds the configured persona pool")
             if req.count > config.MAX_AGENTS - orchestrator.live_count():
                 raise RuntimeError("not enough available agent slots for the profile-post batch")
-            chosen = orchestrator.selected_personas(req.count, req.personas)
             profile_posts = await profile_post_orchestrator.plan(
-                req.queries[0], [persona.name for persona in chosen],
+                prompt, [persona.name for persona in chosen],
             )
+        elif prompt and any(persona.browsing_mode == "reddit_browse" for persona in chosen):
+            subreddits = await select_subreddits(prompt)
+        if req.prompt.strip():
+            queries = [prompt]
         return {"agents": orchestrator.launch(
-            req.target, req.queries, req.count, mode=req.mode,
-            selected_persona_names=req.personas, profile_posts=profile_posts,
+            req.target, queries, req.count,
+            mode=req.mode, selected_personas=req.personas,
+            subreddits=subreddits, profile_posts=profile_posts,
         )}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

@@ -59,8 +59,11 @@ class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("backend.main.orchestrator.live_count", return_value=0),
             patch(
-                "backend.main.orchestrator.selected_personas",
-                return_value=[SimpleNamespace(name="Cobb"), SimpleNamespace(name="Arthur")],
+                "backend.main.orchestrator.resolve_personas",
+                return_value=[
+                    SimpleNamespace(name="Cobb", browsing_mode="reddit_browse"),
+                    SimpleNamespace(name="Arthur", browsing_mode="reddit_browse"),
+                ],
             ),
             patch(
                 "backend.main.profile_post_orchestrator.plan",
@@ -73,7 +76,8 @@ class ProfilePostLaunchTests(unittest.IsolatedAsyncioTestCase):
         planner.assert_awaited_once_with("launch topic", ["Cobb", "Arthur"])
         start.assert_called_once_with(
             "https://www.reddit.com", ["launch topic"], 2,
-            mode="profile_post", selected_persona_names=None, profile_posts=posts,
+            mode="profile_post", selected_personas=None,
+            subreddits=None, profile_posts=posts,
         )
         self.assertEqual(len(result["agents"]), 2)
 
