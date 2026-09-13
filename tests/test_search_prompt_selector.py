@@ -32,7 +32,7 @@ class SearchPromptSelectorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["Eames"], "python automation tools")
         payload = client.__aenter__.return_value.post.await_args.kwargs["json"]
-        self.assertEqual(payload["model"], "gpt-5.4-mini")
+        self.assertEqual(payload["model"], "gpt-5.6-sol")
         self.assertEqual(payload["reasoning"], {"effort": "low"})
 
     async def test_rejects_duplicate_queries(self):

@@ -21,7 +21,7 @@ summarization.
 
 Browsing behavior is bound in `Persona.browsing_mode`: Cobb, Arthur,
 Ariadne, and Generic 1–4 use the read-only subreddit tour. When a topic launch
-includes Yusuf, `gpt-5.4-mini` assigns him a relevant warm-up subreddit and writes
+includes Yusuf, `gpt-5.6-sol` assigns him a relevant warm-up subreddit and writes
 a profile post framing the user's startup as a solution to the compute shortage.
 Yusuf scrolls that subreddit and dwells for two seconds before publishing. Eames, Saito,
 Mal, and Generic 5–8 retain the legacy flow. A launch-wide `mode` cannot override
@@ -33,29 +33,37 @@ still ends the hold immediately.
 The API counts the bound personas that can launch, then selects three subreddits
 once when a topic is supplied and at least one selected persona is bound. It
 shares that route only with bound browsers. Direct Dreamer
-runs select from their query before opening Steel. With no topic, bound personas
-use the default hackathon/technology tour. Standalone login/author adapter helpers
+runs select from their query before opening Steel. With no assigned task (topic,
+explicit route, or profile post), every persona authenticates and stays idle
+for five minutes without browsing, searching, or posting. This
+login-only run does not add a second completion hold. Standalone login/author adapter helpers
 remain explicit operations outside the Dreamer browsing lifecycle.
 For selected legacy personas that use Google, a topic launch also calls
-`gpt-5.4-mini` once before opening Steel and assigns each persona a distinct,
+`gpt-5.6-sol` once before opening Steel and assigns each persona a distinct,
 topic-relevant search query. The assignment is keyed by persona so mixed launches
 keep their predetermined queries. A failed or invalid assignment rejects the launch.
 
 The Activity page launches a Reddit tour using `backend/reddit_patrol.py`, without
-the campaign coordinator or signup/login flow. When Yusuf is selected for a topic
+the campaign coordinator. Every persona uses the same authentication flow before
+either executing a task or staying idle: reuse a verified signed-in Steel profile,
+otherwise use saved credentials to log in, or use the Temp-Mail signup flow when
+credentials are missing. When Yusuf is selected for a topic
 launch, he instead performs the automatic warm-up and profile-post flow described
 above. The user enters a topic;
-`backend/subreddit_selector.py` calls `gpt-5.4-mini` with low reasoning once per
+`backend/subreddit_selector.py` calls `gpt-5.6-sol` with low reasoning once per
 launch to choose exactly three distinct subreddit names, shared by launched
 bound personas. This requires `OPENAI_API_KEY` and uses `OPENAI_BASE_URL`. Invalid or
 failed model responses reject the launch before opening Steel sessions.
 Profile-post launches reuse those three communities as exclusions. The
-`gpt-5.4-mini` profile-post orchestrator assigns each posting persona one additional,
+`gpt-5.6-sol` profile-post orchestrator assigns each posting persona one additional,
 mutually distinct warm-up subreddit, which the agent opens and browses for a random
 2–5 seconds before it starts its profile post.
 Only the destinations vary; the browsing choreography remains fixed.
 `browsing_plan(persona_name)` still supplies the fixed behavior for any persona;
-its default hackathon/technology route is used when no topic is supplied.
+its default hackathon/technology route remains available to explicit browsing
+callers; an empty launch no longer starts that tour. Assign the existing actions
+using a topic and selected `personas` in `POST /api/runs`. These assignments are
+made at launch; idle sessions do not consume later ledger assignments.
 For each new-post feed, scroll 480/640/480 pixels, select the first two unique
 same-community post links in document order, open each, pause six seconds on
 the body, scroll visible comments 420/540/540 pixels, pause four seconds, then
@@ -190,6 +198,27 @@ Run `uv run python scripts/check_yusuf_login.py` for one live login check with
 a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 
 ## API
+
+Signup retains Temp-Mail in the original tab and opens Reddit in a new tab.
+Email-code prompts after the signup email step, signup submission, or password
+login trigger an inbox check with a two-minute email timeout. Saved logins can
+reuse an inbox restored by the Steel profile, but its address must match the
+Reddit email; an expired/lost inbox cannot be recovered from the address alone.
+The agent enters a six-digit code (single or separate digit inputs), returns to
+Reddit, and requires the prompt to clear. Codes are not logged. Without a prompt,
+the existing flow continues. Both tabs stay open until session release. Coverage
+uses mocked browsers; live email verification has not been tested.
+
+Login/signup cancels optional "Use a secure/security key with this website"
+prompts by clicking Cancel, with Enter on the focused Cancel button as a fallback.
+Reddit public-key credential requests are declined before browser-native dialogs
+open; password and email-code credentials are unaffected. This does not satisfy
+mandatory security-key authentication. Live security-key dialogs are untested.
+After checking the security-key prompt, login/signup also checks for an
+the first "About you" screen and navigates directly to `https://www.reddit.com/`.
+This redirect happens once per Dreamer run, replacing the repeated Skip flow.
+On "Choose your interest(s)", it selects Technology and clicks Continue,
+then waits for the interests screen to close before proceeding.
 
 Read-only Reddit browsing can be checked separately with
 `uv run python scripts/check_yusuf_reddit.py --query python`. This uses one

@@ -44,7 +44,7 @@ async def _publish(args):
             context = browser.contexts[0]
             page = context.pages[0] if context.pages else await context.new_page()
             async with asyncio.timeout(180):
-                await dreamer._prepare_reddit_access(page)
+                page = await dreamer._prepare_reddit_access(page)
                 author = RedditAuthor(dreamer, page, dry_run=args.dry_run)
                 if args.action == "post":
                     result = await author.create_post(args.title, args.body, request_id=args.request_id)

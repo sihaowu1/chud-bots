@@ -23,6 +23,8 @@ from playwright.async_api import (
 
 from . import agent_state_store, events, steel_client
 from .personas import DWELL_DEEP, DWELL_LANDING, DWELL_SERP, Persona, dwell
+from .reddit_security_key import install_security_key_cancellation, dismiss_security_key_prompt
+from .reddit_onboarding import handle_onboarding
 
 SEARCH_URL = "https://www.google.com/?hl=en"
 TEMP_MAIL_URL = "https://temp-mail.org/en/"
@@ -96,10 +98,16 @@ class Dreamer:
         self._stop = asyncio.Event()
         self.task: asyncio.Task | None = None
         self._email_copied = False
+        self._about_you_redirected = False
+        self._temp_mail_page: Page | None = None
         self._reddit_authenticated = False
         self._reddit_login_http_status: int | None = None
 
     # ---- lifecycle -------------------------------------------------------
+
+    @property
+    def has_task(self) -> bool:
+        return bool(self.state.query.strip() or self.profile_post is not None or self.browse_subreddits)
 
     def stop(self) -> None:
         self._stop.set()
@@ -132,10 +140,9 @@ class Dreamer:
                 browser = await pw.chromium.connect_over_cdp(session.websocket_url)
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
-                if self.mode != "reddit_browse":
-                    await self._prepare_reddit_access(page)
+                page = await self._prepare_reddit_access(page)
                 await self._dream(page)
-                if self.persona.name == "Yusuf":
+                if self.persona.name == "Yusuf" and self.has_task:
                     await self._hold_yusuf_session(page)
 
             self.state.status = "done"
@@ -166,8 +173,8 @@ class Dreamer:
             await asyncio.sleep(1)
         self._check_stop()
 
-    async def _prepare_reddit_access(self, page: Page) -> None:
-        """Log in with complete saved credentials, otherwise run signup."""
+    async def _prepare_reddit_access(self, page: Page) -> Page:
+        """Log in or sign up and return the Reddit tab for subsequent browsing."""
         saved = agent_state_store.load_or_create(self.persona.name)
         if (saved.get("steel") or {}).get("profile_id"):
             self._emit(note="checking Reddit login restored from Steel profile", url=REDDIT_HOME_URL)
@@ -175,7 +182,7 @@ class Dreamer:
             if await self._reddit_username(page):
                 self._reddit_authenticated = True
                 self._emit(0, "restored signed-in Reddit home page from Steel profile", page.url)
-                return
+                return page
         email = saved.get("email")
         address = email.get("address") if isinstance(email, dict) else None
         password = email.get("password") if isinstance(email, dict) else None
@@ -184,10 +191,14 @@ class Dreamer:
             self.state.email = address
             self._emit(note=f"using saved email {address}")
             await self._login_reddit(page, address, password)
-            return
+            return page
 
         await self._ensure_email(page)
+        if page is self._temp_mail_page:
+            self._check_stop()
+            page = await page.context.new_page()
         await self._prepare_reddit_signup(page)
+        return page
 
     async def _ensure_email(self, page: Page) -> None:
         """Load this persona's saved email or obtain one from Temp-Mail."""
@@ -206,6 +217,7 @@ class Dreamer:
                 return
 
             self._emit(note="opening Temp-Mail for an email address")
+            self._temp_mail_page = page
             await page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded")
             handle = await page.wait_for_function(
                 """
@@ -250,6 +262,8 @@ class Dreamer:
 
         self._check_stop()
         self._emit(note="opening Reddit signup", url=REDDIT_SIGNUP_URL)
+        await install_security_key_cancellation(page)
+        await page.bring_to_front()
         await page.goto(REDDIT_SIGNUP_URL, wait_until="domcontentloaded")
 
         field = page.locator(
@@ -297,6 +311,7 @@ class Dreamer:
                 "button", name=re.compile(r"continue|next", re.IGNORECASE)
             ).first
             await continue_button.click()
+            await self._verify_reddit_email(page, password_step=True)
             await password_field.wait_for(state="visible", timeout=15_000)
 
         await password_field.click()
@@ -312,11 +327,18 @@ class Dreamer:
         ).first
         await submit.click()
         self._emit(note="submitted Reddit credentials", url=page.url)
+        await self._verify_reddit_email(page)
+
+    async def _verify_reddit_email(self, page: Page, *, password_step: bool = False) -> None:
+        from .reddit_verification import verify_if_requested
+
+        await verify_if_requested(self, page, password_step=password_step)
 
     async def _login_reddit(self, page: Page, address: str, password: str) -> None:
         """Submit a saved email and password through Reddit's login page."""
         self._check_stop()
         self._emit(note="opening Reddit home before login", url=REDDIT_HOME_URL)
+        await install_security_key_cancellation(page)
         await page.goto(REDDIT_HOME_URL, wait_until="domcontentloaded")
         await self._solve_reddit_captcha(page)
         login_link = page.get_by_role(
@@ -372,6 +394,7 @@ class Dreamer:
         try:
             await submit.click()
             self._emit(note="submitted saved Reddit login", url=page.url)
+            await self._verify_reddit_email(page)
             await self._wait_for_reddit_home(page)
         finally:
             page.remove_listener("response", record_login_response)
@@ -391,6 +414,8 @@ class Dreamer:
         )
         while asyncio.get_running_loop().time() < deadline:
             self._check_stop()
+            await dismiss_security_key_prompt(self, page)
+            await handle_onboarding(self, page)
             if self._reddit_login_http_status and self._reddit_login_http_status >= 400:
                 raise RuntimeError(
                     f"Reddit rejected the login request (HTTP {self._reddit_login_http_status}); "
@@ -491,6 +516,16 @@ class Dreamer:
         )
 
     async def _dream(self, page: Page) -> None:
+        if not self.has_task:
+            if not self._reddit_authenticated:
+                await self._wait_for_reddit_home(page)
+            self._emit(0, "no task assigned; staying idle for 5 minutes", page.url)
+            for _ in range(LOGIN_ONLY_DWELL_SECONDS):
+                self._check_stop()
+                await asyncio.sleep(1)
+            self._check_stop()
+            self._emit(0, "login-only run complete", page.url)
+            return
         if self.mode == "reddit_browse":
             from .reddit_patrol import browse_reddit
 
@@ -519,16 +554,6 @@ class Dreamer:
                 post["title"], post["body"], request_id=post["request_id"],
             )
             self._emit(3, "profile post confirmed", result["url"])
-            return
-        if not self.state.query.strip():
-            if not self._reddit_authenticated:
-                await self._wait_for_reddit_home(page)
-            self._emit(0, "holding logged-in session for 5 minutes", page.url)
-            for _ in range(LOGIN_ONLY_DWELL_SECONDS):
-                self._check_stop()
-                await asyncio.sleep(1)
-            self._check_stop()
-            self._emit(0, "login-only run complete", page.url)
             return
         await self._search(page)
         self._check_stop()

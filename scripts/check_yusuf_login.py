@@ -97,7 +97,7 @@ async def main():
                     agent_module.REDDIT_LOGIN_TIMEOUT_SECONDS = 300
                     await dreamer._wait_for_reddit_home(page)
                 else:
-                    await dreamer._prepare_reddit_access(page)
+                    page = await dreamer._prepare_reddit_access(page)
                 await dreamer._dream(page)
             finally:
                 await page.screenshot(

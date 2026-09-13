@@ -18,7 +18,7 @@ async def select_subreddits(prompt: str, browser_count: int = 1) -> tuple[str, .
     if not config.OPENAI_API_KEY:
         raise OrchestratorConfigurationError("OPENAI_API_KEY is required to select subreddits")
     payload = {
-        "model": "gpt-5.4-mini",
+        "model": config.ORCHESTRATOR_MODEL,
         "reasoning": {"effort": "low"},
         "instructions": (
             "Act as the browsing-route orchestrator. Select exactly three distinct existing public "

@@ -26,7 +26,9 @@ class PatrolTests(unittest.IsolatedAsyncioTestCase):
         ])
 
     async def test_route_reads_comments_and_returns_without_clicking_controls(self):
-        dreamer = Dreamer(pick(1)[0], "", "", mode="reddit_browse")
+        cobb = next(persona for persona in pick(15) if persona.name == "Cobb")
+        dreamer = Dreamer(cobb, "", "", mode="reddit_browse")
+        dreamer.browse_subreddits = ("hackathon",)
         page = Mock(url="https://www.reddit.com/")
         page.goto = AsyncMock(return_value=Mock(status=200))
         page.mouse.wheel = AsyncMock()

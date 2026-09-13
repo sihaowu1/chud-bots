@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from backend import orchestrator, personas
@@ -12,6 +13,30 @@ ROUTE = ('python', 'coding', 'programming')
 
 
 class BindingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_every_persona_without_task_holds_instead_of_acting(self):
+        for persona in personas.pick(15):
+            with self.subTest(persona=persona.name):
+                agent = Dreamer(persona, '  ', '')
+                agent._reddit_authenticated = True
+                page = SimpleNamespace(url='https://www.reddit.com/')
+                with patch('backend.reddit_patrol.browse_reddit', new_callable=AsyncMock) as browse, patch(
+                    'backend.agent.asyncio.sleep', new_callable=AsyncMock,
+                ) as sleep, patch.object(agent, '_search', new_callable=AsyncMock) as search:
+                    await agent._dream(page)
+                browse.assert_not_awaited()
+                search.assert_not_awaited()
+                self.assertEqual(sleep.await_count, 300)
+                self.assertEqual(agent.state.note, 'login-only run complete')
+
+    async def test_explicit_route_is_a_task_without_a_topic(self):
+        cobb = next(p for p in personas.pick(15) if p.name == 'Cobb')
+        agent = Dreamer(cobb, '', '')
+        agent.browse_subreddits = ROUTE
+        page = SimpleNamespace(url='https://www.reddit.com/')
+        with patch('backend.reddit_patrol.browse_reddit', new_callable=AsyncMock) as browse:
+            await agent._dream(page)
+        browse.assert_awaited_once_with(agent, page)
+
     def test_exactly_four_named_and_four_generic_bound_in_every_launch_mode(self):
         pool = personas.pick(15)
         self.assertEqual({p.name for p in pool if p.browsing_mode == 'reddit_browse'}, BOUND)

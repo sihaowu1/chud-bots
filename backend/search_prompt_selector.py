@@ -24,7 +24,7 @@ async def select_search_prompts(
 
     count = len(persona_names)
     payload = {
-        "model": "gpt-5.4-mini",
+        "model": config.ORCHESTRATOR_MODEL,
         "reasoning": {"effort": "low"},
         "instructions": (
             "Act as a search-query planner. Return exactly one concise Google search query for "

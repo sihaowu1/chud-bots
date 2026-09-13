@@ -32,7 +32,7 @@ class SelectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_model_reasoning_and_topic(self):
         result, payload = await self.select(self.response())
         self.assertEqual(result, tuple(NAMES))
-        self.assertEqual(payload['model'], 'gpt-5.4-mini')
+        self.assertEqual(payload['model'], 'gpt-5.6-sol')
         self.assertEqual(payload['reasoning'], {'effort': 'low'})
         self.assertEqual(json.loads(payload['input']), {
             'topic': 'Python tools', 'bound_browser_count': 4,

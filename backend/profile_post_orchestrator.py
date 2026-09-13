@@ -68,7 +68,7 @@ class OpenAIProfilePostPlanner:
             },
         }
         payload = {
-            "model": "gpt-5.4-mini",
+            "model": config.ORCHESTRATOR_MODEL,
             "reasoning": {"effort": "low"},
             "instructions": _SYSTEM_INSTRUCTIONS,
             "input": json.dumps({"query": query, "agents": agents}, ensure_ascii=False),

@@ -16,7 +16,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         playwright.__aenter__ = AsyncMock(return_value=pw)
         playwright.__aexit__ = AsyncMock(return_value=False)
         dreamer = MagicMock()
-        dreamer._prepare_reddit_access = AsyncMock()
+        dreamer._prepare_reddit_access = AsyncMock(return_value=page)
         author = MagicMock()
         author.create_post = AsyncMock(return_value={
             "status": "draft", "url": "https://example.test/post",
