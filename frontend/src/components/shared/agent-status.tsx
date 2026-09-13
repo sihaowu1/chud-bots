@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import type { AgentStatus } from "@/lib/types";
+import type { SessionStatus } from "@/lib/sessions/types";
 import { STATUS_LABEL } from "@/lib/mock/agents";
 import { StatusDot, TONE_TEXT, type Tone } from "./status-dot";
 import { useSim } from "@/lib/store";
@@ -20,8 +21,37 @@ export const AGENT_STATUS_TONE: Record<AgentStatus, Tone> = {
 
 const ACTIVE: AgentStatus[] = ["searching", "analyzing", "writing"];
 
+/** Real backend session status (`BrowserAgent["status"]`), a separate enum from the mock's `AgentStatus`. */
+export const SESSION_STATUS_TONE: Record<SessionStatus, Tone> = {
+  queued: "muted",
+  running: "signal",
+  done: "success",
+  failed: "danger",
+  stopped: "muted",
+};
+
+const SESSION_STATUS_LABEL: Record<SessionStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+  stopped: "Stopped",
+};
+
+const SESSION_STATUSES: SessionStatus[] = [
+  "queued",
+  "running",
+  "done",
+  "failed",
+  "stopped",
+];
+
+function isSessionStatus(s: AgentStatus | SessionStatus): s is SessionStatus {
+  return (SESSION_STATUSES as string[]).includes(s);
+}
+
 interface Props {
-  status: AgentStatus;
+  status: AgentStatus | SessionStatus;
   className?: string;
   /** Hide the label, show only the dot. */
   dotOnly?: boolean;
@@ -34,6 +64,23 @@ export function AgentStatusBadge({
   dotOnly,
 }: Props) {
   const globalPause = useSim((s) => s.paused);
+
+  if (isSessionStatus(rawStatus)) {
+    const tone = SESSION_STATUS_TONE[rawStatus];
+    return (
+      <span
+        className={cn("inline-flex items-center gap-1.5 text-xs", className)}
+      >
+        <StatusDot tone={tone} pulse={rawStatus === "running"} />
+        {!dotOnly && (
+          <span className={TONE_TEXT[tone]}>
+            {SESSION_STATUS_LABEL[rawStatus]}
+          </span>
+        )}
+      </span>
+    );
+  }
+
   const status: AgentStatus =
     globalPause && rawStatus !== "error" ? "paused" : rawStatus;
   const tone = AGENT_STATUS_TONE[status];

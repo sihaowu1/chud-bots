@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, Inbox, Pause } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useSim } from "@/lib/store";
-import { useActivityFilters, CATEGORY_FILTERS } from "@/lib/filters";
-import type { ActivityEvent } from "@/lib/types";
+import { ArrowDown, Inbox } from "lucide-react";
+import { useSessions } from "@/lib/sessions/store";
+import { useActivityFilters } from "@/lib/filters";
+import type { LogRow } from "./types";
 import { ActivityRow, ROW_GRID, ROW_GRID_COMPACT } from "./activity-row";
 import { ActivityDetail } from "./activity-detail";
 import { CategorySegments, SecondaryFilters } from "./activity-filters";
@@ -24,25 +23,22 @@ interface Props {
   compact?: boolean;
   showFilters?: boolean;
   showSecondaryFilters?: boolean;
-  /** Agent to visually emphasise (e.g. hovered in another panel). */
+  /** Agent (by BrowserAgent id) to visually emphasise (e.g. hovered in another panel). */
   highlightAgentId?: string | null;
   className?: string;
   listClassName?: string;
 }
 
-export function useFilteredEvents(events: ActivityEvent[]) {
-  const { category, agentId, platform, status } = useActivityFilters();
+export function useFilteredEvents(rows: LogRow[]) {
+  const { status, persona, errorOnly } = useActivityFilters();
   return useMemo(() => {
-    const cat = CATEGORY_FILTERS.find((c) => c.value === category);
-    return events.filter((e) => {
-      if (cat && cat.value !== "all" && !cat.match.includes(e.category))
-        return false;
-      if (agentId && e.agentId !== agentId) return false;
-      if (platform && e.platform !== platform) return false;
-      if (status && e.status !== status) return false;
+    return rows.filter((r) => {
+      if (status !== "all" && r.agent?.status !== status) return false;
+      if (persona && r.persona !== persona) return false;
+      if (errorOnly && !r.error) return false;
       return true;
     });
-  }, [events, category, agentId, platform, status]);
+  }, [rows, status, persona, errorOnly]);
 }
 
 export function ActivityFeed({
@@ -57,20 +53,31 @@ export function ActivityFeed({
   className,
   listClassName,
 }: Props) {
-  const router = useRouter();
-  const hydrated = useSim((s) => s.hydrated);
-  const paused = useSim((s) => s.paused);
-  const events = useSim((s) => s.events);
+  const start = useSessions((s) => s.start);
+  const connection = useSessions((s) => s.connection);
+  const logs = useSessions((s) => s.logs);
+  const agents = useSessions((s) => s.agents);
   const reset = useActivityFilters((s) => s.reset);
   const hasFilter = useActivityFilters(
-    (s) => s.category !== "all" || s.agentId || s.platform || s.status,
+    (s) => s.status !== "all" || s.persona || s.errorOnly,
   );
 
-  const filtered = useFilteredEvents(events);
+  useEffect(() => start(), [start]);
+
+  const rows: LogRow[] = useMemo(
+    () =>
+      logs.map((l) => ({
+        ...l,
+        agent: l.persona
+          ? agents.find((a) => a.persona === l.persona)
+          : undefined,
+      })),
+    [logs, agents],
+  );
+
+  const filtered = useFilteredEvents(rows);
 
   // --- Freeze logic: don't move rows under a user who is reading. --------
-  // While a row is selected or the list is scrolled, new events are held back
-  // and surfaced as a "N new events" affordance instead of shifting the list.
   const scrollRef = useRef<HTMLDivElement>(null);
   const [frozenTs, setFrozenTs] = useState<number | null>(null);
   const [mountedAt] = useState(() => Date.now());
@@ -121,10 +128,7 @@ export function ActivityFeed({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, select]);
 
-  const onAgentClick = useCallback(
-    (agentId: string) => router.push(`/agents?agent=${agentId}`),
-    [router],
-  );
+  const loading = connection === "connecting" && rows.length === 0;
 
   return (
     <div className={cn("@container flex min-h-0 flex-col", className)}>
@@ -142,15 +146,8 @@ export function ActivityFeed({
         )}
       >
         <span>Time</span>
-        <span>Agent</span>
-        {!compact && <span className="hidden @3xl:block">Action</span>}
-        <span>
-          <span className={cn(!compact && "@3xl:hidden")}>Action · </span>
-          Context
-        </span>
-        <span className="justify-self-end">Score</span>
+        <span>Message</span>
         <span>Status</span>
-        <span />
       </div>
 
       <div
@@ -182,13 +179,11 @@ export function ActivityFeed({
           )}
         </AnimatePresence>
 
-        {!hydrated && (
+        {loading && (
           <div className="space-y-px px-4 py-2">
             {Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex h-9 items-center gap-3">
                 <Skeleton className="h-3 w-14" />
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-3 w-32" />
                 <Skeleton className="h-3 flex-1" />
                 <Skeleton className="h-3 w-16" />
               </div>
@@ -196,24 +191,22 @@ export function ActivityFeed({
           </div>
         )}
 
-        {hydrated && paused && visible.length === 0 && (
-          <EmptyState
-            icon={Pause}
-            title="Agents are paused"
-            description="Resume agents to continue receiving activity."
-          />
-        )}
-
-        {hydrated && !paused && visible.length === 0 && (
+        {!loading && visible.length === 0 && (
           <EmptyState
             icon={Inbox}
             title={
-              hasFilter ? "No events match these filters" : "No activity yet"
+              hasFilter
+                ? "No events match these filters"
+                : connection === "offline"
+                  ? "Backend offline"
+                  : "No activity yet"
             }
             description={
               hasFilter
-                ? "Try widening the category or clearing the agent, platform and status filters."
-                : "Agents will report here as soon as they start working."
+                ? "Try clearing the agent, status or error filters."
+                : connection === "offline"
+                  ? "Start the backend to see live logs here."
+                  : "Agents will report here as soon as they start working."
             }
             action={
               hasFilter ? (
@@ -226,21 +219,22 @@ export function ActivityFeed({
         )}
 
         <div className="divide-y divide-border/60">
-          {visible.map((e) => {
-            const isSelected = selectedId === e.id;
+          {visible.map((row) => {
+            const isSelected = selectedId === row.id;
             return (
-              <div key={e.id}>
+              <div key={row.id}>
                 <ActivityRow
-                  event={e}
+                  row={row}
                   selected={isSelected}
-                  isNew={e.ts > mountedAt}
+                  isNew={row.ts > mountedAt}
                   compact={compact}
                   highlighted={
-                    !!highlightAgentId && e.agentId === highlightAgentId
+                    !!highlightAgentId && row.agent?.id === highlightAgentId
                   }
-                  dimmed={!!highlightAgentId && e.agentId !== highlightAgentId}
+                  dimmed={
+                    !!highlightAgentId && row.agent?.id !== highlightAgentId
+                  }
                   onSelect={select}
-                  onAgentClick={onAgentClick}
                 />
                 {mode === "inline" && (
                   <AnimatePresence initial={false}>
@@ -256,7 +250,7 @@ export function ActivityFeed({
                         }}
                         className="overflow-hidden bg-signal/[0.03]"
                       >
-                        <ActivityDetail event={e} layout="inline" />
+                        <ActivityDetail event={row} layout="inline" />
                       </motion.div>
                     )}
                   </AnimatePresence>
