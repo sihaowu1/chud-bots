@@ -5,18 +5,20 @@ Run from the repo root:  uv run uvicorn backend.main:app --reload
 
 import asyncio
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, events, orchestrator, steel_client
+from . import config, events, orchestrator, personas, steel_client
 from .orchestrator_agent import (
     CampaignOrchestrator,
     OrchestratorConfigurationError,
     OrchestratorModelError,
 )
+from .profile_post_orchestrator import ProfilePostOrchestrator
 
 
 @asynccontextmanager
@@ -27,9 +29,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Inception", lifespan=lifespan)
 campaign_orchestrator = CampaignOrchestrator()
+profile_post_orchestrator = ProfilePostOrchestrator()
 
 
 class LaunchRequest(BaseModel):
+    mode: Literal["legacy", "reddit_browse", "profile_post"] = "legacy"
+    personas: list[str] | None = None
     target: str = Field(..., description="URL of the site to plant in search")
     queries: list[str] = Field(
         default_factory=list,
@@ -60,7 +65,28 @@ class ActivityRequest(BaseModel):
 @app.post("/api/runs")
 async def launch(req: LaunchRequest):
     try:
-        return {"agents": orchestrator.launch(req.target, req.queries, req.count)}
+        profile_posts = None
+        if req.mode == "profile_post":
+            if len(req.queries) != 1 or not req.queries[0].strip():
+                raise ValueError("profile_post mode requires exactly one non-empty query")
+            if req.count > len(personas.names()):
+                raise ValueError("profile_post count exceeds the configured persona pool")
+            if req.count > config.MAX_AGENTS - orchestrator.live_count():
+                raise RuntimeError("not enough available agent slots for the profile-post batch")
+            chosen = orchestrator.selected_personas(req.count, req.personas)
+            profile_posts = await profile_post_orchestrator.plan(
+                req.queries[0], [persona.name for persona in chosen],
+            )
+        return {"agents": orchestrator.launch(
+            req.target, req.queries, req.count, mode=req.mode,
+            selected_persona_names=req.personas, profile_posts=profile_posts,
+        )}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except OrchestratorConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except OrchestratorModelError as exc:
+        raise HTTPException(502, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

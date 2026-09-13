@@ -38,6 +38,24 @@ def validated_body(body: str, limit: int) -> str:
     return body
 
 
+def profile_post_url(value: str, username: str) -> str:
+    """Return a same-origin permalink for a post owned by this profile."""
+    parsed = urlsplit(value)
+    profile = re.fullmatch(
+        rf"/user/{re.escape(username)}/comments/[a-z0-9]+/[^/]+/?",
+        parsed.path,
+        re.I,
+    )
+    legacy = re.fullmatch(
+        rf"/r/u_{re.escape(username)}/comments/[a-z0-9]+/[^/]+/?",
+        parsed.path,
+        re.I,
+    )
+    if parsed.scheme != "https" or parsed.netloc != "www.reddit.com" or not (profile or legacy):
+        raise ValueError("Reddit returned an invalid profile post permalink")
+    return ORIGIN + parsed.path.rstrip("/") + "/"
+
+
 class RedditAuthor:
     def __init__(self, dreamer: Dreamer, page: Page, *, dry_run: bool = False):
         self.dreamer = dreamer
@@ -103,6 +121,24 @@ class RedditAuthor:
         return {"url": thread_url(ORIGIN + data["permalink"]),
                 "reddit_id": data["name"], "reddit_username": username,
                 "removed_by_category": data.get("removed_by_category")}
+
+    @staticmethod
+    def _matches_profile_post(data: dict, payload: dict, username: str) -> bool:
+        return (
+            data.get("author", "").casefold() == username.casefold()
+            and data.get("title") == payload["title"]
+            and data.get("selftext", "").strip() == payload["body"]
+            and data.get("subreddit", "").casefold() == f"u_{username}".casefold()
+        )
+
+    @staticmethod
+    def _profile_post_result(data: dict, username: str) -> dict:
+        return {
+            "url": profile_post_url(ORIGIN + data["permalink"], username),
+            "reddit_id": data["name"],
+            "reddit_username": username,
+            "removed_by_category": data.get("removed_by_category"),
+        }
 
     async def reconcile_post(self, request_id: str, post_id: str) -> dict:
         """Read-only recovery of an uncertain post using its observed Reddit ID."""
@@ -185,7 +221,12 @@ class RedditAuthor:
         # Exclusive creation protects against concurrent processes using this key.
         with path.open("x", encoding="utf-8") as handle:
             json.dump(receipt, handle, indent=2)
-        self.dreamer._emit(2, f"submitting {payload['action']} to r/{COMMUNITY}")
+        destination = (
+            "the signed-in profile"
+            if payload["action"] == "create_profile_post"
+            else f"r/{COMMUNITY}"
+        )
+        self.dreamer._emit(2, f"submitting {payload['action']} to {destination}")
         await button.click(timeout=15_000)
         result = await verify()
         self._confirm(path, receipt, result, username)
@@ -221,6 +262,44 @@ class RedditAuthor:
 
         return await self._submit(path, payload, username,
                                   self.page.get_by_role("button", name="Post", exact=True), verify)
+
+    async def create_profile_post(self, title: str, body: str, *, request_id: str) -> dict:
+        """Create a text post on the authenticated account's own profile."""
+        title = title.strip()
+        if not title or len(title) > 300 or "\n" in title or "\r" in title:
+            raise ValueError("Title must be a single line of 1 to 300 characters")
+        body = validated_body(body, 40_000)
+        payload = dict(
+            action="create_profile_post", target="profile", title=title,
+            body=body, request_id=request_id,
+        )
+        path, cached = self._receipt(request_id, payload)
+        if cached:
+            return cached
+        username = await self._identity()
+        existing = {data["name"] for data in await self._submitted(username)}
+        await self._open(f"{ORIGIN}/user/{username}/submit/?type=TEXT")
+        await self.page.get_by_role("textbox", name="Title", exact=True).fill(title)
+        await self.page.get_by_role(
+            "textbox", name="Post body text field", exact=True,
+        ).fill(body)
+
+        async def verify():
+            async with asyncio.timeout(45):
+                while True:
+                    try:
+                        for data in await self._submitted(username):
+                            if (data["name"] not in existing
+                                    and self._matches_profile_post(data, payload, username)):
+                                return self._profile_post_result(data, username)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)
+
+        return await self._submit(
+            path, payload, username,
+            self.page.get_by_role("button", name="Post", exact=True), verify,
+        )
 
     async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
         url = thread_url(post_url)

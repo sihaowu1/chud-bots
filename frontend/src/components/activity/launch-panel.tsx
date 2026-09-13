@@ -5,7 +5,6 @@ import { Loader2, Play, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useSessions } from "@/lib/sessions/store";
 import { toast } from "@/components/shared/toast";
 
@@ -19,35 +18,22 @@ export function LaunchPanel() {
     (s) => s.agents.filter((a) => a.status === "running").length,
   );
 
-  const [subreddit, setSubreddit] = useState("SaaS");
-  const [queries, setQueries] = useState(
-    "best alternatives to Zapier\nAI workflow automation",
-  );
+  const [query, setQuery] = useState("Inception won Battle of the Schools");
   const [count, setCount] = useState(3);
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const sub = subreddit
-      .trim()
-      .replace(/^https?:\/\/(?:www\.)?reddit\.com\/r\//i, "")
-      .replace(/^\/?r\//i, "")
-      .replace(/^\/+|\/+$/g, "");
     try {
       await launch({
-        target: sub
-          ? `https://www.reddit.com/r/${encodeURIComponent(sub)}`
-          : "https://www.reddit.com",
-        queries: queries
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        target: "https://www.reddit.com",
+        queries: [query.trim()],
         count,
       });
       toast({
         title: `${count} agent${count === 1 ? "" : "s"} launched`,
-        description: sub ? `Target r/${sub}` : "Login only",
+        description: "Creating one targeted post on each agent profile",
       });
     } catch (err) {
       toast({
@@ -63,39 +49,24 @@ export function LaunchPanel() {
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-1.5">
         <Label
-          htmlFor="sub"
+          htmlFor="query"
           className="text-xs font-normal text-muted-foreground"
         >
-          Target subreddit <span className="text-fg-subtle">(optional)</span>
+          Query
         </Label>
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-xs text-fg-subtle">r/</span>
-          <Input
-            id="sub"
-            value={subreddit}
-            onChange={(e) => setSubreddit(e.target.value)}
-            placeholder="SaaS"
-            className="h-8 font-mono text-xs"
-          />
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <Label
-          htmlFor="queries"
-          className="text-xs font-normal text-muted-foreground"
-        >
-          Search queries{" "}
-          <span className="text-fg-subtle">
-            (one per line; blank = login only)
-          </span>
-        </Label>
-        <Textarea
-          id="queries"
-          rows={3}
-          value={queries}
-          onChange={(e) => setQueries(e.target.value)}
-          className="font-mono text-xs"
+        <Input
+          id="query"
+          required
+          maxLength={500}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="What should every agent post about?"
+          className="h-8 font-mono text-xs"
         />
+        <p className="text-[11px] text-fg-subtle">
+          The orchestrator drafts distinct copy from this topic. Every launched
+          agent posts once to its own Reddit profile.
+        </p>
       </div>
       <div className="flex items-end gap-3">
         <div className="space-y-1.5">
@@ -109,7 +80,7 @@ export function LaunchPanel() {
             id="count"
             type="number"
             min={1}
-            max={max || 50}
+            max={Math.min(max || 7, 7)}
             value={count}
             onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
             className="h-8 w-20 font-mono text-xs"
