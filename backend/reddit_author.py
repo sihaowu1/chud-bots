@@ -1,4 +1,4 @@
-"""Explicit, disclosed test posts/comments through an authenticated Steel page.
+"""Posts and comments through an authenticated Steel page.
 
 Submission is never retried automatically. A durable receipt is claimed before
 clicking; an interrupted/uncertain submission must be inspected on Reddit.
@@ -19,7 +19,6 @@ from .agent import Dreamer
 
 COMMUNITY = "HackathonsCanada"
 ORIGIN = "https://www.reddit.com"
-DISCLOSURE = "Automated test by the Inception demo in this testing subreddit."
 
 
 def thread_url(value: str) -> str:
@@ -30,14 +29,13 @@ def thread_url(value: str) -> str:
     return ORIGIN + parsed.path.rstrip("/") + "/"
 
 
-def disclosed_body(body: str, limit: int) -> str:
+def validated_body(body: str, limit: int) -> str:
     body = body.strip()
     if not body:
         raise ValueError("Body must not be empty")
-    result = body + "\n\n" + DISCLOSURE
-    if len(result) > limit:
-        raise ValueError(f"Body including disclosure exceeds {limit} characters")
-    return result
+    if len(body) > limit:
+        raise ValueError(f"Body exceeds {limit} characters")
+    return body
 
 
 class RedditAuthor:
@@ -197,7 +195,7 @@ class RedditAuthor:
         title = title.strip()
         if not title or len(title) > 300 or "\n" in title or "\r" in title:
             raise ValueError("Title must be a single line of 1 to 300 characters")
-        body = disclosed_body(body, 40_000)
+        body = validated_body(body, 40_000)
         payload = dict(action="create_post", subreddit=COMMUNITY, title=title,
                        body=body, request_id=request_id)
         path, cached = self._receipt(request_id, payload)
@@ -226,7 +224,7 @@ class RedditAuthor:
 
     async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
         url = thread_url(post_url)
-        body = disclosed_body(body, 10_000)
+        body = validated_body(body, 10_000)
         payload = dict(action="comment", subreddit=COMMUNITY, post_url=url,
                        body=body, request_id=request_id)
         path, cached = self._receipt(request_id, payload)

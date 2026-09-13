@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend.reddit_author import DISCLOSURE, RedditAuthor, disclosed_body, thread_url
+from backend.reddit_author import RedditAuthor, thread_url, validated_body
 
 
 class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
@@ -27,11 +27,11 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 thread_url(url)
 
-    def test_disclosure_and_limits(self):
-        self.assertEqual(disclosed_body(" test ", 1000), "test\n\n" + DISCLOSURE)
-        for body, limit in ((" ", 1000), ("x" * 100, 100)):
+    def test_body_validation_and_limits(self):
+        self.assertEqual(validated_body(" test ", 1000), "test")
+        for body, limit in ((" ", 1000), ("x" * 101, 100)):
             with self.assertRaises(ValueError):
-                disclosed_body(body, limit)
+                validated_body(body, limit)
 
     async def test_invalid_title_never_touches_browser(self):
         for title in ("", "x" * 301, "two\nlines"):
@@ -81,7 +81,7 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.author._identity = AsyncMock(return_value="test-user")
         self.author._open = AsyncMock()
         data = {"name": "t3_new", "author": "test-user", "title": "Question?",
-                "selftext": disclosed_body("Body", 40_000), "subreddit": "HackathonsCanada",
+                "selftext": validated_body("Body", 40_000), "subreddit": "HackathonsCanada",
                 "permalink": "/r/HackathonsCanada/comments/new/question/", "removed_by_category": "reddit"}
         self.author._submitted = AsyncMock(side_effect=[[], [data]])
         control = Mock(fill=AsyncMock(), click=AsyncMock())
@@ -100,7 +100,7 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         post = {"name": "t3_abc", "subreddit": "HackathonsCanada"}
         data = {"name": "t1_new", "parent_id": "t3_abc", "author": "test-user",
                 "subreddit": "HackathonsCanada",
-                "body": disclosed_body("Reply", 10_000),
+                "body": validated_body("Reply", 10_000),
                 "permalink": "/r/HackathonsCanada/comments/abc/question/new/"}
         before = [{"data": {"children": [{"data": post}]}}, {"data": {"children": []}}]
         after = [before[0], {"data": {"children": [{"data": data}]}}]
@@ -119,7 +119,7 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
     def _uncertain_comment(self):
         payload = {"action": "comment", "subreddit": "HackathonsCanada",
                    "post_url": "https://www.reddit.com/r/HackathonsCanada/comments/abc/question/",
-                   "body": disclosed_body("Reply", 10_000), "request_id": "reply"}
+                   "body": validated_body("Reply", 10_000), "request_id": "reply"}
         path = self.author._receipt_path("reply")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"status": "uncertain", "payload": payload,

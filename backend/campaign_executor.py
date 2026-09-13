@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from . import orchestrator_log
 from .orchestrator_agent import CampaignOrchestrator
-from .reddit_author import disclosed_body, thread_url
+from .reddit_author import thread_url, validated_body
 from .reddit_runner import publish
 
 
@@ -84,7 +84,9 @@ class CampaignExecutor:
                              "command": vars(command)},
                             logs_dir=self.coordinator.logs_dir,
                         )
-                        content = disclosed_body(command.body, 40_000 if kind == "post" else 10_000)
+                        content = validated_body(
+                            command.body, 40_000 if kind == "post" else 10_000
+                        )
                         if run["environment"] == "mock":
                             result = {
                                 "url": f"https://mock.local/{'posts' if kind == 'post' else 'comments'}/{task['id']}",

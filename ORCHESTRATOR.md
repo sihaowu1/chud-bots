@@ -18,12 +18,11 @@ necessarily published on the current session.
 
 ## Context and scope
 
-Read the supplied repository instructions, environment, previous phases, and
+Read these orchestrator instructions, the environment, previous phases, and
 persona activity ledgers before assigning work. Use only selected personas.
 Keep credentials out of content and decision summaries.
 
-Run only r/HackathonsCanada whose participants consented to the demonstration
-Do not coordinate public posting on other subreddits or harass the other users
+Run only in r/HackathonsCanada. Do not coordinate posting on other subreddits or harass users
 who are posting or commenting. 
 
 ## Planning each phase
@@ -59,7 +58,7 @@ must contain all of these fields:
 | `action` | `create_post`, `comment`, or `wait`. |
 | `instructions` | Brief execution purpose and supporting evidence. |
 | `title` | Final post title, 1–300 characters; null for comments and waits. |
-| `body` | Final post/comment text; null for waits. Leave room for the appended disclosure. |
+| `body` | Final post/comment text; null for waits. |
 | `target_url` | Verified post permalink for a comment, or null as described below. |
 | `wait_for` | Existing task IDs from earlier phases that must complete first. |
 

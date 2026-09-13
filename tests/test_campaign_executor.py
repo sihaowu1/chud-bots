@@ -51,7 +51,7 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         completed = [e for e in result["events"] if e.get("status") == "completed"]
         self.assertEqual(len(completed), 2)
         self.assertEqual(completed[1]["parent_url"], completed[0]["url"])
-        self.assertIn("Automated test", completed[0]["content"])
+        self.assertEqual(completed[0]["content"], "Test discussion")
         self.assertEqual(agent_state_store.load_or_create("Cobb")["reddit"]["username"], "saved_identity")
         resumed = await self.executor.execute(run["id"])
         self.assertEqual(len(resumed["events"]), len(result["events"]))

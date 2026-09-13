@@ -20,9 +20,9 @@ summarization.
 ### Current implementation
 
 The code implements the earlier search-traffic prototype and a model-backed
-campaign coordinator. The coordinator reads this file and the durable agent
+campaign coordinator. The coordinator reads `ORCHESTRATOR.md` and the durable agent
 ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone
-Reddit author adapter supports disclosed test posts and top-level comments in
+Reddit author adapter supports posts and top-level comments in
 r/HackathonsCanada through a logged-in Steel browser. The CLI executor now connects structured
 campaign assignments to this adapter for configured Reddit runs, with a local
 mock executor for testing. AI Overview evaluation is not implemented.
@@ -167,7 +167,7 @@ Any named persona with a saved Reddit login/Steel profile can publish through
 `scripts/reddit_publish.py`. This separate runner does not use the launch UI.
 It restores the persona profile, checks the signed-in identity, fills Reddit's
 browser composer, clicks once, verifies the saved content, and releases Steel.
-All content includes an automated-demo disclosure and targets r/HackathonsCanada.
+All content targets r/HackathonsCanada.
 Once the community is private, the account must have access granted by its owner.
 Pass `--dry-run` before `post` or `comment` to fill the composer and check its
 submit control without clicking or creating a submission receipt.
@@ -223,15 +223,14 @@ existing CLI, or start and execute a campaign in one command (OPENAI_API_KEY is
 needed for planning, including mock mode):
 
 ```powershell
-uv run python scripts/reddit_publish.py orchestrate --prompt "Create a disclosed synthetic kickoff, then a reply" --personas Cobb Arthur --phases 2
+uv run python scripts/reddit_publish.py orchestrate --prompt "Create a kickoff, then a reply" --personas Cobb Arthur --phases 2
 uv run python scripts/reddit_publish.py orchestrate --run-id RUN_ID
 uv run python scripts/reddit_publish.py orchestrate --prompt "Run our Reddit demo" --personas Cobb Arthur --environment private --phases 2
 ```
 
 Mock is the default: it records synthetic URLs and activity without opening Steel
-or changing saved Reddit identities. Commands contain final `title`/`body` fields;
-the author appends the
-existing automated disclosure. Legacy prose-only assignments fail without posting.
+or changing saved Reddit identities. Commands contain final `title`/`body` fields.
+Legacy prose-only assignments fail without posting.
 
 Execution is serial and bounded by `--phases` (default 1). Each batch executes
 pending assignments, reports results without per-task replanning, then replans

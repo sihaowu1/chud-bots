@@ -20,7 +20,7 @@ class FakePlanner:
                     {
                         "persona": "Cobb",
                         "action": "create_post",
-                        "instructions": "Create a clearly labeled synthetic kickoff post.",
+                        "instructions": "Create the kickoff post.",
                         "target_url": None,
                         "wait_for": [],
                     }
@@ -70,9 +70,9 @@ class CampaignOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["assignments"][0]["id"], task["id"])
         self.assertIn("activity", state)
         self.assertNotIn("email", self.planner.contexts[0]["agents"][0])
-        repository_instructions = self.planner.contexts[0]["repository_instructions"]
-        self.assertTrue(repository_instructions.startswith("# agents.md"))
-        self.assertIn("## What this is", repository_instructions)
+        orchestrator_instructions = self.planner.contexts[0]["orchestrator_instructions"]
+        self.assertTrue(orchestrator_instructions.startswith("# Inception orchestrator prompt"))
+        self.assertIn("## Objective", orchestrator_instructions)
         snapshots = sorted((Path(self.temp_dir.name) / "logs" / run["id"]).glob("*.json"))
         self.assertEqual([path.name for path in snapshots], ["0.json", "1.json"])
         latest = json.loads(snapshots[-1].read_text(encoding="utf-8"))

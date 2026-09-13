@@ -48,26 +48,23 @@ _PLAN_SCHEMA = {
     },
 }
 
-_SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for a staged social-media demo.
-Read and obey the supplied repository instructions. Assign the smallest useful next step to
-each selected synthetic persona. The only actions are create_post, comment, and wait.
+_SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for Reddit content.
+Read and obey the supplied orchestrator instructions. Assign the smallest useful next step to
+each selected persona. The only actions are create_post, comment, and wait.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
 Do not assign duplicate work that is already completed or in progress. Keep persona voices
 distinct. Supply final title and body for create_post, body for comment, and null
-title/body for wait. Instructions summarize the command. The publisher appends an
-automated-demo disclosure. Comments are top-level replies only. Use an observed post
+title/body for wait. Instructions summarize the command. Comments are top-level replies
+only. Use an observed post
 URL as target_url, or null with exactly one create_post task ID in wait_for whose
 completed URL the executor will use. Only r/HackathonsCanada is supported in private
 runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must reference
 tasks from previous phases. Never issue shell commands.
 
-This planner may operate only in a mock environment or a private environment whose
-participants consented. Never plan public coordinated
-posting, platform-control evasion, spam, or manufactured consensus. If the request conflicts
-with that boundary, assign a wait task explaining what operator confirmation or environment
-change is required.
+Never plan platform-control evasion or spam. If the request conflicts with that boundary,
+assign a wait task explaining the blocker.
 """
 
 
@@ -325,11 +322,15 @@ class CampaignOrchestrator:
 
     def _context(self, run: dict[str, Any]) -> dict[str, Any]:
         try:
-            repository_instructions = config.AGENTS_INSTRUCTIONS_PATH.read_text(encoding="utf-8")
+            orchestrator_instructions = config.ORCHESTRATOR_INSTRUCTIONS_PATH.read_text(
+                encoding="utf-8"
+            )
         except OSError as exc:
-            raise OrchestratorConfigurationError(f"could not read agents.md: {exc}") from exc
+            raise OrchestratorConfigurationError(
+                f"could not read ORCHESTRATOR.md: {exc}"
+            ) from exc
         return {
-            "repository_instructions": repository_instructions,
+            "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
             "environment": run["environment"],
             "run_id": run["id"],

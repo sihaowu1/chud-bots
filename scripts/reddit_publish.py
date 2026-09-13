@@ -1,4 +1,4 @@
-"""Publish disclosed test content; use `orchestrate --help` for campaign commands."""
+"""Publish Reddit content; use `orchestrate --help` for campaign commands."""
 
 import argparse
 import asyncio
