@@ -21,8 +21,8 @@ class Persona:
 
 _POOL = [
     # Yusuf is first temporarily so login runs exercise his saved credentials during testing.
-    Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
-    Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
+    # Persona("Yusuf", False, (80, 180), 2, (3, 6), ["desktop", "curious"]),
+    # Persona("Cobb", False, (60, 140), 3, (3, 6), ["thorough", "desktop"]),
     Persona("Arthur", False, (40, 90), 2, (2, 4), ["fast typist", "desktop"]),
     Persona("Ariadne", False, (90, 200), 3, (4, 8), ["desktop", "scroller"]),
     Persona("Eames", False, (70, 160), 1, (2, 3), ["skimmer", "desktop"]),
