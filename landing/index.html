@@ -1,0 +1,90 @@
+<!--
+  Static visual landing page for "Inception".
+
+  This page is a standalone graphic only: no JavaScript, no forms, no
+  links out, no calls into the real app or backend. Serve it on its own
+  port, separate from the real frontend (e.g. frontend/ on :3000):
+
+    npx serve landing -l 4300
+    python -m http.server 4300 --directory landing
+
+  Then open http://localhost:4300
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inception — Multi-agent discoverability platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="glow" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <rect x="1" y="9" width="3" height="6" rx="0.75" fill="currentColor" opacity="0.45" />
+            <rect x="6.5" y="5.5" width="3" height="9.5" rx="0.75" fill="currentColor" opacity="0.7" />
+            <rect x="12" y="1" width="3" height="14" rx="0.75" fill="currentColor" />
+          </svg>
+          <span class="brand-name">Inception</span>
+        </div>
+        <ul class="topnav">
+          <li>Opportunities</li>
+          <li>Agents</li>
+          <li>Discoverability</li>
+          <li>Analytics</li>
+        </ul>
+        <div class="topbar-actions">
+          <span class="topbar-login">Log in</span>
+          <span class="topbar-cta">Sign up</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero container">
+          <h1 class="hero-title">
+            <svg viewBox="0 0 16 16" width="54" height="54" aria-hidden="true">
+              <rect x="1" y="9" width="3" height="6" rx="0.75" fill="currentColor" opacity="0.45" />
+              <rect x="6.5" y="5.5" width="3" height="9.5" rx="0.75" fill="currentColor" opacity="0.7" />
+              <rect x="12" y="1" width="3" height="14" rx="0.75" fill="currentColor" />
+            </svg>
+            Inception
+          </h1>
+          <p>Like the Christopher Nolan movie, planting ideas in LLM's subconsciousness.</p>
+          <div class="hero-ctas">
+            <span class="btn btn-primary">Get started</span>
+            <span class="btn btn-secondary">View demo</span>
+          </div>
+        </section>
+
+        <section class="stats container">
+          <div class="stat">
+            <div class="stat-value">128</div>
+            <div class="stat-label">Agents deployed</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">4,392</div>
+            <div class="stat-label">Opportunities found</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">96%</div>
+            <div class="stat-label">Discoverability score</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">18.4K</div>
+            <div class="stat-label">Views per agent</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
