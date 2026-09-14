@@ -101,7 +101,10 @@ STEEL_USE_PROXY=true
 
 ```powershell
 # 3. Start the app
+uv run python -m uvicorn backend.analytics.app:app --host 127.0.0.1 --port 8001
 uv run uvicorn backend.main:app
+cd frontend
+npm run dev
 ```
 
 Open <http://127.0.0.1:8000>, optionally enter a subreddit, add one or more search queries, set **Dreamers** to `1`, then click **Go under**. The target is fixed to Reddit; when a subreddit is supplied, the agent targets that community.

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from playwright.async_api import async_playwright
 from backend import agent as agent_module, agent_state_store, config, steel_client
 from backend.agent import Dreamer
-from backend.personas import pick
+from backend.personas import names, pick
 
 
 async def main():
@@ -37,7 +37,8 @@ async def main():
             return await original_create(**kwargs)
 
         steel_client.client().sessions.create = create_plain
-    dreamer = Dreamer(pick(1)[0], "", "https://www.reddit.com")
+    persona = next(p for p in pick(len(names())) if p.name == "Yusuf")
+    dreamer = Dreamer(persona, "", "https://www.reddit.com")
     original_emit = dreamer._emit
 
     def emit(level=None, note="", url=None):
@@ -46,7 +47,8 @@ async def main():
             print(note, flush=True)
 
     dreamer._emit = emit
-    session = None if args.local_browser else await steel_client.create_session()
+    print("STEEL PROXY:", config.STEEL_USE_PROXY, flush=True)
+    session = None if args.local_browser else await steel_client.create_session(persona="Yusuf")
     if session:
         dreamer.state.session = steel_client.session_summary(session)
     try:
@@ -80,10 +82,14 @@ async def main():
                         }, flush=True)
                     except Exception:
                         print("Submission format unavailable", flush=True)
-                    body = await response.text()
-                    for secret in secrets:
-                        body = body.replace(secret, "[redacted]")
                     if response.status >= 400:
+                        try:
+                            body = await response.text()
+                        except Exception:
+                            print("LOGIN ERROR: response body unavailable after navigation", flush=True)
+                            return
+                        for secret in secrets:
+                            body = body.replace(secret, "[redacted]")
                         print("LOGIN ERROR:", body[:1200], flush=True)
 
             page.on("response", inspect_response)
@@ -97,8 +103,10 @@ async def main():
                     agent_module.REDDIT_LOGIN_TIMEOUT_SECONDS = 300
                     await dreamer._wait_for_reddit_home(page)
                 else:
-                    await dreamer._prepare_reddit_access(page)
-                await dreamer._dream(page)
+                    page = await dreamer._prepare_reddit_access(page)
+                if not dreamer._reddit_authenticated:
+                    raise RuntimeError("Live check did not confirm a signed-in Reddit identity")
+                print("LOGIN SUCCESS: confirmed signed-in Reddit identity", flush=True)
             finally:
                 await page.screenshot(
                     path="scripts/yusuf-login.png",

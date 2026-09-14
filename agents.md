@@ -19,6 +19,69 @@ summarization.
 
 ### Current implementation
 
+Browsing behavior is bound in `Persona.browsing_mode`: Cobb, Arthur,
+Ariadne, and Generic 1–4 use the read-only subreddit tour. When a topic launch
+includes Yusuf, `gpt-5.6-sol` assigns him a relevant warm-up subreddit and writes
+a profile post framing the user's startup as a solution to the compute shortage.
+Yusuf scrolls that subreddit and dwells for two seconds before publishing. Eames, Saito,
+Mal, and Generic 5–8 retain the legacy flow. A launch-wide `mode` cannot override
+these bindings except for Yusuf's automatic topic-post assignment. Pool order remains
+seven named personas followed by eight generic personas.
+After Yusuf completes his assigned browsing or posting task, his Steel session stays
+open for five minutes so the final browser state remains visible; an operator kick
+still ends the hold immediately.
+The API counts the bound personas that can launch, then selects three subreddits
+once when a topic is supplied and at least one selected persona is bound. It
+shares that route only with bound browsers. Direct Dreamer
+runs select from their query before opening Steel. With no assigned task (topic,
+explicit route, or profile post), every persona authenticates and stays idle
+for five minutes without browsing, searching, or posting. This
+login-only run does not add a second completion hold. Standalone login/author adapter helpers
+remain explicit operations outside the Dreamer browsing lifecycle.
+The **prompt orchestrator** (`backend/search_prompt_selector.py`) assigns search
+prompts to dreamers. For selected legacy personas that use Google, a topic launch calls
+`gpt-5.6-sol` once before opening Steel and assigns each persona a distinct,
+topic-relevant search query. The assignment is keyed by persona so mixed launches
+keep their predetermined queries. A failed or invalid assignment rejects the launch.
+
+The Activity page launches a Reddit tour using `backend/reddit_patrol.py`, without
+the campaign coordinator. Every persona uses the same authentication flow before
+either executing a task or staying idle: reuse a verified signed-in Steel profile,
+otherwise use saved credentials to log in, or use the Temp-Mail signup flow when
+credentials are missing. When Yusuf is selected for a topic
+launch, he instead performs the automatic warm-up and profile-post flow described
+above. The user enters a topic;
+`backend/subreddit_selector.py` calls `gpt-5.6-sol` with low reasoning once per
+launch to choose exactly three distinct subreddit names, shared by launched
+bound personas. This requires `OPENAI_API_KEY` and uses `OPENAI_BASE_URL`. Invalid or
+failed model responses reject the launch before opening Steel sessions.
+Profile-post launches reuse those three communities as exclusions. The
+`gpt-5.6-sol` profile-post orchestrator assigns each posting persona one additional,
+mutually distinct warm-up subreddit, which the agent opens and browses for a random
+2–5 seconds before it starts its profile post.
+Only the destinations vary; the browsing choreography remains fixed.
+`browsing_plan(persona_name)` still supplies the fixed behavior for any persona;
+its default hackathon/technology route remains available to explicit browsing
+callers; an empty launch no longer starts that tour. Assign the existing actions
+using a topic and selected `personas` in `POST /api/runs`. These assignments are
+made at launch; idle sessions do not consume later ledger assignments.
+For each new-post feed, scroll 480/640/480 pixels, select the first two unique
+same-community post links in document order, open each, pause six seconds on
+the body, scroll visible comments 420/540/540 pixels, pause four seconds, then
+return to the listing. Scroll pauses are two seconds. No votes or submissions.
+The post-selection rules repeat; model-selected communities, live posts, load
+times and availability can change. Model suggestions are not verified for existence
+in advance. HTTP failures fail the session; missing posts/comments are reported.
+Progress uses the existing SSE and Steel viewer; sessions release on completion.
+
+Use `POST /api/runs` with `{"target":"https://www.reddit.com",
+"mode":"reddit_browse","prompt":"Python tools","count":1,"personas":["Cobb"]}`
+to choose a persona and topic. Topic selection accepts a nonblank prompt (at most
+2000 characters); `queries` joined with newlines is also accepted when prompt is absent.
+Omit `personas` to use pool order. Both the API and static display honor persona
+bindings regardless of the launch-wide mode hint.
+The separate model-backed publishing CLI remains available.
+
 The code implements the earlier search-traffic prototype and a model-backed
 campaign coordinator. The coordinator reads `ORCHESTRATOR.md` and the durable agent
 ledgers, then assigns `create_post`, `comment`, or `wait` tasks. A standalone
@@ -54,6 +117,7 @@ is the only file that imports the Steel SDK.
 | `events.py`      | In-process pub/sub that feeds the SSE stream. |
 | `config.py`      | `.env` loading and constants. |
 | `orchestrator_agent.py` | GPT-backed structured task planning, continuation, and durable run audit. |
+| `search_prompt_selector.py` | Prompt orchestrator: assigns distinct topic-relevant search prompts to dreamers before launch. |
 | `campaign_executor.py` | Bounded CLI execution of post/comment/wait assignments, dependencies, and callbacks. |
 | `reddit_runner.py` | Shared CLI publisher: persona locking, authenticated Steel session, author adapter, and cleanup. |
 | `agent_state_store.py` | Per-persona identity, assignment, and timestamped activity ledgers. |
@@ -79,7 +143,7 @@ npm run build && npm run lint                   # both must be clean
 
 | path | role |
 |------|------|
-| `src/app/(app)/*` | routes: dashboard `/`, campaign, **activity** (live browser sessions), **logs** (agent event feed), opportunities, agents (list + network), discoverability, analytics, settings |
+| `src/app/(app)/*` | routes: **dashboard** `/` (live browser sessions), campaign, **logs** (agent event feed), opportunities, discoverability, analytics, settings |
 | `src/app/globals.css` | design tokens. Single dark theme, neutral surfaces, one accent (`--signal`), semantic success/warning/danger. Keyframes for row entry/flash. |
 | `src/lib/types.ts` | domain model: Campaign, Agent, ActivityEvent, PlannedTask, Opportunity… |
 | `src/lib/mock/*` | seed data. `agents.ts` holds the deploy order + `allocationFor(n)`; `content.ts` the thread/query pools the simulator draws from. |
@@ -88,7 +152,7 @@ npm run build && npm run lint                   # both must be clean
 | `src/lib/sim/use-simulation.ts` | mounts the 2–5 s tick loop once, in `AppShell`. |
 | `src/components/shell/*` | sidebar, top bar (campaign switcher, live state, pause-all with confirm), notifications, ⌘K palette. |
 | `src/components/logs/*` | the event feed (Logs page + dashboard). `activity-feed.tsx` holds back new rows while the user is scrolled or inspecting and shows "N new events ↓" instead. |
-| `src/lib/sessions/*` + `src/components/activity/*` | the Activity page: a wall of the dreamers' cloud-browser sessions from the `agent-login` backend. `store.ts` polls `/backend/api/agents` (+ SSE `/backend/api/events`) and embeds each Steel `debug_url` in an iframe; if the backend is unreachable it runs `mock.ts`, which replays the same Temp-Mail → Reddit signup/login → CAPTCHA → Google → land → deepen script with a sketched viewer. `next.config.ts` rewrites `/backend/*` to `BACKEND_URL` (default `http://127.0.0.1:8000`) because the FastAPI app has no CORS. |
+| `src/lib/sessions/*` + `src/components/activity/*` | the Dashboard: a wall of the dreamers' cloud-browser sessions from the `agent-login` backend. `store.ts` polls `/backend/api/agents` (+ SSE `/backend/api/events`) and embeds each Steel `debug_url` in an iframe; if the backend is unreachable it runs `mock.ts`, which replays the same Temp-Mail → Reddit signup/login → CAPTCHA → Google → land → deepen script with a sketched viewer. `next.config.ts` rewrites `/backend/*` to `BACKEND_URL` (default `http://127.0.0.1:8000`) because the FastAPI app has no CORS. |
 | `src/components/shared/*` | primitives: status dots, animated numbers, score, inspector panel, toast with undo, section/panel/field. |
 
 Conventions that matter here:
@@ -137,6 +201,27 @@ a screenshot at `scripts/yusuf-login.png`; its session is released afterward.
 
 ## API
 
+Signup retains Temp-Mail in the original tab and opens Reddit in a new tab.
+Email-code prompts after the signup email step, signup submission, or password
+login trigger an inbox check with a two-minute email timeout. Saved logins can
+reuse an inbox restored by the Steel profile, but its address must match the
+Reddit email; an expired/lost inbox cannot be recovered from the address alone.
+The agent enters a six-digit code (single or separate digit inputs), returns to
+Reddit, and requires the prompt to clear. Codes are not logged. Without a prompt,
+the existing flow continues. Both tabs stay open until session release. Coverage
+uses mocked browsers; live email verification has not been tested.
+
+Login/signup cancels optional "Use a secure/security key with this website"
+prompts by clicking Cancel, with Enter on the focused Cancel button as a fallback.
+Reddit public-key credential requests are declined before browser-native dialogs
+open; password and email-code credentials are unaffected. This does not satisfy
+mandatory security-key authentication. Live security-key dialogs are untested.
+After checking the security-key prompt, login/signup also checks for an
+the first "About you" screen and navigates directly to `https://www.reddit.com/`.
+This redirect happens once per Dreamer run, replacing the repeated Skip flow.
+On "Choose your interest(s)", it selects Technology and clicks Continue,
+then waits for the interests screen to close before proceeding.
+
 Read-only Reddit browsing can be checked separately with
 `uv run python scripts/check_yusuf_reddit.py --query python`. This uses one
 Yusuf Steel session and his saved credentials/profile, scrolls the home page,
@@ -160,6 +245,15 @@ not vote, post, or comment, and does not alter the existing launch flow.
 | POST   | `/api/orchestrations/{id}/activity` | executor callback; records username/content/URLs/timestamps and re-plans by default |
 
 ## Campaign coordinator
+
+The Next.js dashboard query at `localhost:3000` sends its query to the orchestrator through
+`POST /backend/api/orchestrations` (proxied to FastAPI). Its agent count selects
+personas in backend pool order; the dashboard displays the returned summary,
+post/comment/wait assignments, final copy, and dependencies. Plans use the mock
+environment and are not executed by this form. The browser wall still displays
+existing sessions; browser launches remain available through `/api/runs` and the
+static display. The latest plan stays in client memory while navigating; durable
+runs remain available through the orchestration API.
 
 ### Standalone Reddit authoring
 
@@ -212,6 +306,37 @@ the adapter in an existing authenticated Steel session. Serialize publishing
 operations for each persona/profile; different request IDs are independent.
 
 ### Planning
+
+Dashboard execution opens one real Steel browser for every selected persona at
+the same time. Execution requires a post or comment assignment for every selected
+persona, including plans saved before that requirement was introduced. Each
+agent starts its task as soon as its own login succeeds; it does not wait for
+other agents to authenticate. Commands reuse those browsers across phases.
+After execution, browsers remain visible for five minutes, with Kick and
+Stop All releasing them immediately. Startup or authentication failures are
+reported as execution failures, not campaign success. Independent dashboard
+commands run concurrently, with one command per persona at a time and confirmed
+dependencies required before comments start. A failed task stops later batches
+after already-running peers settle. One persona's authentication failure does
+not prevent authenticated peers from executing their ready assignments. The
+campaign still reports the failed persona. The standalone CLI retains serial execution
+and its per-command session lifecycle.
+
+New campaigns use only their own assignments and activity as planning history.
+Comment targets come from the same confirmed post library shown on the dashboard,
+including posts from earlier runs and personas outside the current selection.
+Library posts are reference targets, not evidence that a new request is complete.
+The planner defaults to one new profile post and relevant library comments for
+the other selected agents. Comment publishing supports the library's Reddit
+profile and community URLs; r/HackathonsCanada is no longer a comment restriction.
+The adapter verifies library membership and the actual target community, and
+comment receipts retain that community for verification and recovery.
+An explicit request to post or promote requires a new post assignment; a prior
+campaign on the same topic does not fulfill it. Saved persona identities and
+durable receipts persist, and resuming a task retains its submission protections.
+The first plan must give every selected persona a post or comment assignment;
+plans that omit a persona or leave it with only a wait are rejected. Later phases
+may finish or wait once the requested work is complete or blocked.
 
 Set `OPENAI_API_KEY`, then send the user's campaign prompt to
 `POST /api/orchestrations`. The coordinator uses `gpt-5.6-sol` with medium

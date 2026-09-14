@@ -65,22 +65,21 @@ const TYPE_LABEL: Partial<Record<EntityType, string>> = {
 };
 
 export function CampaignForm() {
-  const campaign = useSim((s) => s.campaign);
   const update = useSim((s) => s.updateCampaign);
   const agentCount = useSim((s) => s.agentCount);
 
   const [form, setForm] = useState({
-    type: campaign.type,
-    name: campaign.name,
-    url: campaign.url,
-    description: campaign.description,
-    audience: campaign.audience.join(", "),
-    whyCare: campaign.whyCare,
-    problems: campaign.problems.join("\n"),
-    searchIntent: campaign.searchIntent,
-    topics: campaign.topics,
-    related: campaign.related,
-    avoid: campaign.avoid,
+    type: "Other" as EntityType,
+    name: "",
+    url: "",
+    description: "",
+    audience: "",
+    whyCare: "",
+    problems: "",
+    searchIntent: [] as string[],
+    topics: [] as string[],
+    related: [] as string[],
+    avoid: [] as string[],
   });
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));

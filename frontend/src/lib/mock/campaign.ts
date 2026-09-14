@@ -59,16 +59,4 @@ export const OTHER_CAMPAIGNS: Pick<
     typeLabel: "Software Product",
     status: "running",
   },
-  {
-    id: "cmp_openbench",
-    name: "OpenBench",
-    typeLabel: "Open Source Project",
-    status: "paused",
-  },
-  {
-    id: "cmp_devdays",
-    name: "DevDays Lisbon",
-    typeLabel: "Event",
-    status: "draft",
-  },
 ];

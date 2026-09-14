@@ -1,6 +1,48 @@
 // Mirrors `AgentState.snapshot()` and `steel_client.session_summary()` on the
 // backend (agent-login branch). Field names are the backend's, verbatim.
 
+export interface CampaignPlan {
+  id: string;
+  prompt: string;
+  status: string;
+  execution_status?: "running" | "completed" | "failed";
+  execution_error?: string;
+  events?: {
+    type: string;
+    task_id?: string;
+    status?: string;
+    kind?: string;
+    persona?: string;
+    url?: string | null;
+    note?: string | null;
+  }[];
+  phases: {
+    number: number;
+    summary: string;
+    assignments: {
+      id: string;
+      persona: string;
+      action: "create_post" | "create_profile_post" | "comment" | "wait";
+      instructions: string;
+      title: string | null;
+      body: string | null;
+      target_url: string | null;
+      wait_for: string[];
+    }[];
+  }[];
+}
+
+export interface LibraryPost {
+  id: string;
+  persona: string;
+  url: string;
+  title: string | null;
+  content: string | null;
+  reddit_username: string | null;
+  timestamp: string | null;
+  kind: "post" | "profile_post";
+}
+
 export type SessionStatus =
   "queued" | "running" | "done" | "failed" | "stopped";
 
@@ -15,6 +57,7 @@ export interface SteelSession {
 }
 
 export interface BrowserAgent {
+  mode?: "legacy" | "reddit_browse" | "profile_post";
   id: string;
   persona: string;
   query: string; // "" = login only
@@ -34,6 +77,7 @@ export interface SessionLogLine {
   persona?: string;
   level?: number;
   msg: string;
+  url?: string;
   error?: boolean;
 }
 
@@ -74,6 +118,8 @@ export function stageOf(a: BrowserAgent): Stage {
   if (a.status === "done" || a.status === "failed" || a.status === "stopped")
     return "done";
   const url = a.url ?? "";
+  if (a.mode === "profile_post" && a.level > 0) return "browse";
+  if (a.mode === "reddit_browse") return a.level === 0 ? "wake" : "browse";
   const note = a.note.toLowerCase();
   if (a.level >= 3 || note.includes("dwelling")) return "browse";
   if (a.level === 2) return "land";

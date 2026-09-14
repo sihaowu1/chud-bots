@@ -39,10 +39,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const map: Record<string, string> = {
           d: "/",
           c: "/campaign",
-          a: "/activity",
           l: "/logs",
+          b: "/library",
           o: "/opportunities",
-          g: "/agents",
           v: "/discoverability",
           n: "/analytics",
           s: "/settings",

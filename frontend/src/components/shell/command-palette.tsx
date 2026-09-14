@@ -2,9 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   BarChart3,
-  Bot,
+  BookOpen,
   Compass,
   LayoutGrid,
   Pause,
@@ -27,7 +26,6 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useSim } from "@/lib/store";
-import { ROLE_LABEL } from "@/lib/mock/agents";
 
 interface Props {
   open: boolean;
@@ -36,7 +34,6 @@ interface Props {
 
 export function CommandPalette({ open, onOpenChange }: Props) {
   const router = useRouter();
-  const agents = useSim((s) => s.agents);
   const paused = useSim((s) => s.paused);
   const setPaused = useSim((s) => s.setPaused);
   const reallocate = useSim((s) => s.reallocate);
@@ -64,17 +61,14 @@ export function CommandPalette({ open, onOpenChange }: Props) {
             <CommandItem onSelect={() => go("/campaign")}>
               <Target /> Campaign <CommandShortcut>G C</CommandShortcut>
             </CommandItem>
-            <CommandItem onSelect={() => go("/activity")}>
-              <Activity /> Activity <CommandShortcut>G A</CommandShortcut>
-            </CommandItem>
             <CommandItem onSelect={() => go("/logs")}>
               <ScrollText /> Logs <CommandShortcut>G L</CommandShortcut>
             </CommandItem>
+            <CommandItem onSelect={() => go("/library")}>
+              <BookOpen /> Library <CommandShortcut>G B</CommandShortcut>
+            </CommandItem>
             <CommandItem onSelect={() => go("/opportunities")}>
               <Compass /> Opportunities <CommandShortcut>G O</CommandShortcut>
-            </CommandItem>
-            <CommandItem onSelect={() => go("/agents")}>
-              <Bot /> Agents
             </CommandItem>
             <CommandItem onSelect={() => go("/discoverability")}>
               <Radar /> Discoverability
@@ -115,21 +109,6 @@ export function CommandPalette({ open, onOpenChange }: Props) {
             >
               <Zap /> Reallocate agents
             </CommandItem>
-          </CommandGroup>
-          <CommandSeparator />
-          <CommandGroup heading="Agents">
-            {agents.map((a) => (
-              <CommandItem
-                key={a.id}
-                value={`${a.name} ${ROLE_LABEL[a.role]}`}
-                onSelect={() => go(`/agents?agent=${a.id}`)}
-              >
-                <span className="font-mono text-xs">{a.name}</span>
-                <span className="text-muted-foreground">
-                  {ROLE_LABEL[a.role]}
-                </span>
-              </CommandItem>
-            ))}
           </CommandGroup>
         </CommandList>
       </Command>

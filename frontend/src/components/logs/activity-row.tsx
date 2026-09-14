@@ -81,6 +81,17 @@ function ActivityRowInner({
         <span className={cn(row.error ? "text-danger" : "text-muted-foreground")}>
           {row.msg}
         </span>
+        {row.url && (
+          <a
+            href={row.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="ml-1.5 text-signal hover:underline"
+          >
+            View post
+          </a>
+        )}
       </span>
       {row.agent ? (
         <AgentStatusBadge status={row.agent.status} dotOnly={compact} />

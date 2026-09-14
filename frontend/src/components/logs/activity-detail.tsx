@@ -48,6 +48,18 @@ export function ActivityDetail({
               {event.msg}
             </p>
           </Field>
+          {event.url && (
+            <Field label="Post">
+              <a
+                href={event.url}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all font-mono text-xs text-signal hover:underline"
+              >
+                {event.url}
+              </a>
+            </Field>
+          )}
           {agent?.query && <Field label="Query">“{agent.query}”</Field>}
           {agent?.url && (
             <Field label="URL">

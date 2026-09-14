@@ -9,6 +9,12 @@ from .agent import Dreamer
 _agents: dict[str, Dreamer] = {}
 
 
+def register(dreamer: Dreamer) -> None:
+    """Expose an externally driven Dreamer through the shared agent feed."""
+    _agents[dreamer.state.id] = dreamer
+    events.publish("agent", agent=dreamer.state.snapshot())
+
+
 def live_count() -> int:
     return sum(1 for d in _agents.values() if d.state.status in ("queued", "running"))
 
@@ -17,25 +23,75 @@ def snapshot() -> list[dict]:
     return [d.state.snapshot() for d in _agents.values()]
 
 
-def launch(target: str, queries: list[str], count: int) -> list[dict]:
+def resolve_personas(count: int, selected_personas: list[str] | None = None) -> list[personas.Persona]:
+    pool = {p.name: p for p in personas.pick(len(personas.names()))}
+    if selected_personas is not None:
+        if (len(selected_personas) != count or len(set(selected_personas)) != count
+                or any(name not in pool for name in selected_personas)):
+            raise ValueError("personas must contain count distinct configured persona names")
+        return [pool[name] for name in selected_personas]
+    return personas.pick(count)
+
+
+def launch(target: str, queries: list[str], count: int, *, mode: str = "legacy",
+           selected_personas: list[str] | None = None,
+           subreddits: tuple[str, ...] | None = None,
+           profile_posts: dict[str, dict] | None = None,
+           search_prompts: dict[str, str] | None = None) -> list[dict]:
+    if mode not in ("legacy", "reddit_browse", "profile_post"):
+        raise ValueError("unknown browsing mode")
+    chosen = resolve_personas(count, selected_personas)
+    if mode == "profile_post":
+        expected = {persona.name for persona in chosen}
+        if profile_posts is None or set(profile_posts) != expected:
+            raise ValueError("profile_post mode requires one post for every selected persona")
+    elif profile_posts is not None:
+        selected = {persona.name for persona in chosen}
+        if not profile_posts or not set(profile_posts) <= selected:
+            raise ValueError("profile posts must belong to selected personas")
     room = config.MAX_AGENTS - live_count()
+    if mode == "profile_post" and count > room:
+        raise RuntimeError("not enough available agent slots for the profile-post batch")
     count = max(0, min(count, room))
     if count == 0:
         raise RuntimeError(f"at MAX_AGENTS={config.MAX_AGENTS}; stop some first")
+    if search_prompts is not None:
+        expected_searchers = {
+            persona.name for persona in chosen[:count]
+            if persona.browsing_mode != "reddit_browse"
+        }
+        if set(search_prompts) != expected_searchers or any(
+            not isinstance(query, str) or not query.strip()
+            for query in search_prompts.values()
+        ):
+            raise ValueError("search prompts must cover every launched Google persona")
 
     launched = []
     normalized_queries = [query.strip() for query in queries if query.strip()]
     # An empty query is an explicit login-only run. Keep one sentinel value so
     # the normal persona-cycling launch path still applies.
     query_cycle = itertools.cycle(normalized_queries or [""])
-    for persona in personas.pick(count):
-        d = Dreamer(persona, next(query_cycle), target)
+    for persona in chosen[:count]:
+        query = next(query_cycle)
+        if persona.browsing_mode != "reddit_browse" and search_prompts is not None:
+            query = search_prompts[persona.name].strip()
+        d = Dreamer(
+            persona, query, target, mode=mode,
+            profile_post=profile_posts.get(persona.name) if profile_posts else None,
+        )
+        if d.mode == "reddit_browse":
+            d.browse_subreddits = subreddits
         _agents[d.state.id] = d
         d.task = asyncio.create_task(d.run(), name=f"dreamer-{d.state.id}")
         launched.append(d.state.snapshot())
         events.publish("agent", agent=d.state.snapshot())
-    mode = f"toward {target}" if normalized_queries else "in login-only mode"
-    events.publish("log", msg=f"launched {count} dreamer(s) {mode}")
+    browsing = sum(item["mode"] == "reddit_browse" for item in launched)
+    posting = sum(item["mode"] == "profile_post" for item in launched)
+    legacy = count - browsing - posting
+    description = (
+        f"({posting} profile posters, {browsing} subreddit browsers, {legacy} legacy)"
+    )
+    events.publish("log", msg=f"launched {count} dreamer(s) {description}")
     return launched
 
 

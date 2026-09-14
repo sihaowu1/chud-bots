@@ -16,7 +16,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         playwright.__aenter__ = AsyncMock(return_value=pw)
         playwright.__aexit__ = AsyncMock(return_value=False)
         dreamer = MagicMock()
-        dreamer._prepare_reddit_access = AsyncMock()
+        dreamer._prepare_reddit_access = AsyncMock(return_value=page)
         author = MagicMock()
         author.create_post = AsyncMock(return_value={
             "status": "draft", "url": "https://example.test/post",
@@ -24,8 +24,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(id="session", websocket_url="wss://example.test")
         args = SimpleNamespace(persona="Cobb", dry_run=False, action="post", title="Demo", body="Test", request_id="task")
         with (
-            patch.object(reddit_runner.agent_state_store, "load_or_create", return_value={"steel": {"profile_id": "saved"}}),
             patch.object(reddit_runner, "Dreamer", return_value=dreamer),
+            patch.object(reddit_runner.orchestrator, "register"),
             patch.object(reddit_runner, "async_playwright", return_value=playwright),
             patch.object(reddit_runner, "RedditAuthor", return_value=author),
             patch.object(reddit_runner.steel_client, "create_session", AsyncMock(return_value=session)),
@@ -36,6 +36,46 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "draft")
         author.create_post.assert_awaited_once_with("Demo", "Test", request_id="task")
         release.assert_awaited_once_with("session")
+
+    async def test_missing_profile_still_creates_session_and_authenticates(self):
+        page = MagicMock()
+        browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+        pw = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser)))
+        playwright = MagicMock()
+        playwright.__aenter__ = AsyncMock(return_value=pw)
+        playwright.__aexit__ = AsyncMock(return_value=False)
+        dreamer = MagicMock()
+        dreamer._prepare_reddit_access = AsyncMock(return_value=page)
+        author = MagicMock()
+        author.create_profile_post = AsyncMock(return_value={
+            "status": "confirmed",
+            "url": "https://www.reddit.com/user/new-user/comments/post/profile_post/",
+            "reddit_username": "new-user",
+        })
+        session = SimpleNamespace(id="new-session", websocket_url="wss://example.test")
+        args = SimpleNamespace(
+            persona="Cobb", dry_run=False, action="profile-post", title="Demo",
+            body="Test", request_id="task",
+        )
+        create = AsyncMock(return_value=session)
+        with (
+            patch.object(reddit_runner, "Dreamer", return_value=dreamer),
+            patch.object(reddit_runner.orchestrator, "register"),
+            patch.object(reddit_runner, "async_playwright", return_value=playwright),
+            patch.object(reddit_runner, "RedditAuthor", return_value=author),
+            patch.object(reddit_runner.steel_client, "create_session", create),
+            patch.object(reddit_runner.steel_client, "session_summary", return_value={}),
+            patch.object(reddit_runner.steel_client, "release_session", AsyncMock()) as release,
+        ):
+            result = await reddit_runner._publish(args)
+
+        self.assertEqual(result["reddit_username"], "new-user")
+        create.assert_awaited_once_with(persona="Cobb", interactive=True)
+        dreamer._prepare_reddit_access.assert_awaited_once_with(page)
+        author.create_profile_post.assert_awaited_once_with(
+            "Demo", "Test", request_id="task",
+        )
+        release.assert_awaited_once_with("new-session")
 
     async def test_persona_lock_rejects_overlapping_publishers_and_cleans_up(self):
         args = SimpleNamespace(persona="Cobb")

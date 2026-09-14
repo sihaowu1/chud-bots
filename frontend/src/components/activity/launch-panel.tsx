@@ -9,49 +9,38 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSessions } from "@/lib/sessions/store";
 import { toast } from "@/components/shared/toast";
 
-/** Mirrors the backend's LaunchRequest: target, queries[], count. */
+/** Sends the dashboard query to the orchestrator. */
 export function LaunchPanel() {
-  const launch = useSessions((s) => s.launch);
+  const planCampaign = useSessions((s) => s.planCampaign);
+  const executeCampaign = useSessions((s) => s.executeCampaign);
   const stopAll = useSessions((s) => s.stopAll);
   const clear = useSessions((s) => s.clear);
-  const max = useSessions((s) => s.max);
   const running = useSessions(
     (s) => s.agents.filter((a) => a.status === "running").length,
   );
 
-  const [subreddit, setSubreddit] = useState("SaaS");
-  const [queries, setQueries] = useState(
-    "best alternatives to Zapier\nAI workflow automation",
-  );
   const [count, setCount] = useState(3);
+  const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const sub = subreddit
-      .trim()
-      .replace(/^https?:\/\/(?:www\.)?reddit\.com\/r\//i, "")
-      .replace(/^\/?r\//i, "")
-      .replace(/^\/+|\/+$/g, "");
+    const query = prompt.trim();
     try {
-      await launch({
-        target: sub
-          ? `https://www.reddit.com/r/${encodeURIComponent(sub)}`
-          : "https://www.reddit.com",
-        queries: queries
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        count,
-      });
+      const plan = await planCampaign({ prompt: query, count });
+      const result = await executeCampaign(plan.id);
+      const assignments = result.phases.flatMap((phase) => phase.assignments);
+      const hasBrowserTasks = assignments.some((task) => task.action !== "wait");
       toast({
-        title: `${count} agent${count === 1 ? "" : "s"} launched`,
-        description: sub ? `Target r/${sub}` : "Login only",
+        title: hasBrowserTasks ? "Campaign executed" : "Agents are idle",
+        description: hasBrowserTasks
+          ? "Review the completed assignments on the dashboard"
+          : `Selected agents are signed in and idle. ${assignments[0]?.instructions || "The planner returned no assignments."}`,
       });
     } catch (err) {
       toast({
-        title: "Launch failed",
+        title: "Campaign failed",
         description: String(err instanceof Error ? err.message : err),
       });
     } finally {
@@ -61,41 +50,18 @@ export function LaunchPanel() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        The orchestrator uses your query and agent history to assign posts,
+        comments, or waits, then executes the plan with Steel browser sessions.
+      </p>
       <div className="space-y-1.5">
-        <Label
-          htmlFor="sub"
-          className="text-xs font-normal text-muted-foreground"
-        >
-          Target subreddit <span className="text-fg-subtle">(optional)</span>
+        <Label htmlFor="profile-query" className="text-xs font-normal text-muted-foreground">
+          Query
         </Label>
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-xs text-fg-subtle">r/</span>
-          <Input
-            id="sub"
-            value={subreddit}
-            onChange={(e) => setSubreddit(e.target.value)}
-            placeholder="SaaS"
-            className="h-8 font-mono text-xs"
-          />
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <Label
-          htmlFor="queries"
-          className="text-xs font-normal text-muted-foreground"
-        >
-          Search queries{" "}
-          <span className="text-fg-subtle">
-            (one per line; blank = login only)
-          </span>
-        </Label>
-        <Textarea
-          id="queries"
-          rows={3}
-          value={queries}
-          onChange={(e) => setQueries(e.target.value)}
-          className="font-mono text-xs"
-        />
+        <Textarea id="profile-query" value={prompt}
+          onChange={(e) => setPrompt(e.target.value)} required maxLength={2000}
+          placeholder="What should the campaign accomplish?" rows={3}
+          className="font-mono text-xs" />
       </div>
       <div className="flex items-end gap-3">
         <div className="space-y-1.5">
@@ -109,19 +75,19 @@ export function LaunchPanel() {
             id="count"
             type="number"
             min={1}
-            max={max || 50}
+            max={15}
             value={count}
-            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) => setCount(Math.min(15, Math.max(1, Number(e.target.value) || 1)))}
             className="h-8 w-20 font-mono text-xs"
           />
         </div>
-        <Button type="submit" size="sm" disabled={busy} className="h-8">
+        <Button type="submit" size="sm" disabled={busy || !prompt.trim()} className="h-8">
           {busy ? (
             <Loader2 data-icon="inline-start" className="animate-spin" />
           ) : (
             <Play data-icon="inline-start" />
           )}
-          Launch
+          {busy ? "Executing..." : "Create plan + execute"}
         </Button>
       </div>
       <div className="flex items-center gap-1.5 border-t border-border pt-3">

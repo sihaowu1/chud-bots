@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend.reddit_author import RedditAuthor, thread_url, validated_body
+from backend.reddit_author import (
+    RedditAuthor,
+    comment_target_url,
+    profile_post_url,
+    thread_url,
+    validated_body,
+)
 
 
 class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
@@ -27,11 +33,42 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 thread_url(url)
 
+    def test_comment_target_url_accepts_post_or_comment_permalink(self):
+        self.assertEqual(
+            comment_target_url("https://www.reddit.com/r/HackathonsCanada/comments/abc/title/"),
+            "https://www.reddit.com/r/HackathonsCanada/comments/abc/title/",
+        )
+        self.assertEqual(
+            comment_target_url("https://www.reddit.com/r/HackathonsCanada/comments/abc/title/def/"),
+            "https://www.reddit.com/r/HackathonsCanada/comments/abc/title/def/",
+        )
+        for url in (
+            "https://www.reddit.com/r/other/comments/abc/title/def/",
+            "https://www.reddit.com/user/test/comments/abc/title/def/",
+        ):
+            with self.assertRaises(ValueError):
+                comment_target_url(url)
+
     def test_body_validation_and_limits(self):
         self.assertEqual(validated_body(" test ", 1000), "test")
         for body, limit in ((" ", 1000), ("x" * 101, 100)):
             with self.assertRaises(ValueError):
                 validated_body(body, limit)
+
+    def test_profile_post_url_only_accepts_the_expected_profile(self):
+        self.assertEqual(
+            profile_post_url(
+                "https://www.reddit.com/user/test-user/comments/abc/title/", "test-user"
+            ),
+            "https://www.reddit.com/user/test-user/comments/abc/title/",
+        )
+        for url in (
+            "https://evil.example/user/test-user/comments/abc/title/",
+            "https://www.reddit.com/user/other/comments/abc/title/",
+            "https://www.reddit.com/r/other/comments/abc/title/",
+        ):
+            with self.assertRaises(ValueError):
+                profile_post_url(url, "test-user")
 
     async def test_invalid_title_never_touches_browser(self):
         for title in ("", "x" * 301, "two\nlines"):
@@ -94,6 +131,35 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         control.click.assert_awaited_once()
         self.assertEqual(self.author._submitted.await_count, 2)
 
+    async def test_profile_post_uses_authenticated_profile_and_verifies_content(self):
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._open = AsyncMock()
+        data = {
+            "name": "t3_new",
+            "author": "test-user",
+            "title": "A profile thought",
+            "selftext": "Body",
+            "subreddit": "u_test-user",
+            "permalink": "/user/test-user/comments/new/a_profile_thought/",
+            "removed_by_category": None,
+        }
+        self.author._submitted = AsyncMock(side_effect=[[], [data]])
+        control = Mock(fill=AsyncMock(), click=AsyncMock())
+        self.page.get_by_role.return_value = control
+        with patch("backend.reddit_author.agent_state_store.append_activity"):
+            result = await self.author.create_profile_post(
+                "A profile thought", "Body", request_id="profile-post",
+            )
+
+        self.author._open.assert_awaited_once_with(
+            "https://www.reddit.com/user/test-user/submit/?type=TEXT"
+        )
+        self.assertEqual(
+            result["url"],
+            "https://www.reddit.com/user/test-user/comments/new/a_profile_thought/",
+        )
+        control.click.assert_awaited_once()
+
     async def test_comment_verifies_new_top_level_reply(self):
         self.author._identity = AsyncMock(return_value="test-user")
         self.author._open = AsyncMock()
@@ -115,6 +181,33 @@ class RedditAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cached, result)
         self.assertEqual(result["reddit_id"], "t1_new")
         editor.get_by_role.return_value.click.assert_awaited_once()
+
+    async def test_comment_can_reply_to_existing_comment(self):
+        self.author._identity = AsyncMock(return_value="test-user")
+        self.author._open = AsyncMock()
+        post = {"name": "t3_abc", "subreddit": "HackathonsCanada"}
+        parent = {"name": "t1_parent", "parent_id": "t3_abc", "author": "other",
+                  "subreddit": "HackathonsCanada", "body": "Parent"}
+        data = {"name": "t1_new", "parent_id": "t1_parent", "author": "test-user",
+                "subreddit": "HackathonsCanada",
+                "body": validated_body("Nested reply", 10_000),
+                "permalink": "/r/HackathonsCanada/comments/abc/question/new/"}
+        before = [{"data": {"children": [{"data": post}]}}, {"data": {"children": [{"kind": "t1", "data": parent}]}}]
+        after_parent = {**parent, "replies": {"data": {"children": [{"kind": "t1", "data": data}]}}}
+        after = [before[0], {"data": {"children": [{"kind": "t1", "data": after_parent}]}}]
+        self.author._json = AsyncMock(side_effect=[before, after])
+        editor = self.page.locator.return_value.filter.return_value.first
+        editor.locator.return_value.fill = AsyncMock()
+        editor.get_by_role.return_value.click = AsyncMock()
+        self.page.locator.return_value.first.get_by_role.return_value.click = AsyncMock()
+        with patch("backend.reddit_author.agent_state_store.append_activity"):
+            result = await self.author.comment(
+                "https://www.reddit.com/r/HackathonsCanada/comments/abc/question/parent/",
+                "Nested reply",
+                request_id="nested-reply",
+            )
+        self.assertEqual(result["reddit_id"], "t1_new")
+        self.page.locator.return_value.first.get_by_role.return_value.click.assert_awaited_once()
 
     def _uncertain_comment(self):
         payload = {"action": "comment", "subreddit": "HackathonsCanada",

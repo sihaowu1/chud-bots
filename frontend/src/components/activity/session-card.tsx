@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { motion } from "framer-motion";
-import { ArrowUpRight, Square } from "lucide-react";
+import { ArrowUpRight, Maximize2, Minimize2, Square } from "lucide-react";
 import type { BrowserAgent } from "@/lib/sessions/types";
 import { STAGE_LABEL, STEPS, stageOf, stepIndex } from "@/lib/sessions/types";
 import {
@@ -36,10 +36,17 @@ const STATUS_LABEL: Record<BrowserAgent["status"], string> = {
 
 interface Props {
   agent: BrowserAgent;
+  expanded: boolean;
+  onToggleExpanded: (id: string) => void;
   onStop: (id: string) => void;
 }
 
-function SessionCardInner({ agent: a, onStop }: Props) {
+function SessionCardInner({
+  agent: a,
+  expanded,
+  onToggleExpanded,
+  onStop,
+}: Props) {
   const stage = stageOf(a);
   const idx = stepIndex(stage);
   const live = a.session?.debug_url && a.session.status !== "released";
@@ -55,6 +62,7 @@ function SessionCardInner({ agent: a, onStop }: Props) {
       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
         "flex flex-col overflow-hidden rounded-lg border border-border bg-surface",
+        expanded && "h-[calc(100dvh-8.5rem)] min-h-[32rem]",
         finished && "opacity-70",
       )}
     >
@@ -65,19 +73,62 @@ function SessionCardInner({ agent: a, onStop }: Props) {
             {a.traits.join(" · ")}
           </span>
         </div>
-        <span
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 text-xs",
-            TONE_TEXT[STATUS_TONE[a.status]],
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 text-xs",
+              TONE_TEXT[STATUS_TONE[a.status]],
+            )}
+          >
+            <StatusDot tone={STATUS_TONE[a.status]} pulse={running} size="xs" />
+            {running ? STAGE_LABEL[stage] : STATUS_LABEL[a.status]}
+          </span>
+          {a.session?.viewer_url && (
+            <a
+              href={a.session.viewer_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-subtle transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              aria-label={`Open ${a.persona}'s session in Steel`}
+            >
+              Steel
+              <ArrowUpRight className="size-3" />
+            </a>
           )}
-        >
-          <StatusDot tone={STATUS_TONE[a.status]} pulse={running} size="xs" />
-          {running ? STAGE_LABEL[stage] : STATUS_LABEL[a.status]}
-        </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onToggleExpanded(a.id)}
+                className="rounded p-1 text-fg-subtle hover:bg-foreground/[0.06] hover:text-foreground"
+                aria-label={
+                  expanded
+                    ? `Minimize ${a.persona}'s browser`
+                    : `Expand ${a.persona}'s browser`
+                }
+                aria-pressed={expanded}
+              >
+                {expanded ? (
+                  <Minimize2 className="size-3.5" />
+                ) : (
+                  <Maximize2 className="size-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {expanded ? "Minimize browser" : "Expand browser"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </header>
 
       {/* viewer — Steel's live debug view when we have one, otherwise the sketch */}
-      <div className="relative aspect-[16/10] border-y border-border bg-background">
+      <div
+        className={cn(
+          "relative border-y border-border bg-background",
+          expanded ? "min-h-0 flex-1" : "aspect-[16/10]",
+        )}
+      >
         {live ? (
           <iframe
             title={`${a.persona} live session`}
@@ -147,7 +198,13 @@ function SessionCardInner({ agent: a, onStop }: Props) {
             className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
             title={a.url ?? undefined}
           >
-            {a.query ? `“${a.query}”` : "login only"}
+            {a.mode === "profile_post"
+              ? `Profile post · “${a.query}”`
+              : a.mode === "reddit_browse"
+                ? "Read-only subreddit tour"
+                : a.query
+                  ? `“${a.query}”`
+                  : "login only"}
             {a.url && (
               <>
                 <span className="mx-1.5 text-fg-subtle">·</span>
@@ -156,22 +213,6 @@ function SessionCardInner({ agent: a, onStop }: Props) {
             )}
           </span>
           <span className="flex shrink-0 items-center gap-0.5">
-            {a.session?.viewer_url && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a
-                    href={a.session.viewer_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded p-1 text-fg-subtle hover:bg-foreground/[0.06] hover:text-foreground"
-                    aria-label="Open in Steel"
-                  >
-                    <ArrowUpRight className="size-3.5" />
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent>Open in Steel</TooltipContent>
-              </Tooltip>
-            )}
             {running && (
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -12,12 +12,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
-from . import agent_state_store, config, events, orchestrator_log, personas
+from . import agent_state_store, config, events, orchestrator_log, personas, post_library
 
-ALLOWED_ACTIONS = {"create_post", "comment", "wait"}
+ALLOWED_ACTIONS = {"create_post", "create_profile_post", "comment", "wait"}
 ALLOWED_ACTIVITY_KINDS = {"post", "comment", "wait", "system"}
 ALLOWED_ACTIVITY_STATUSES = {"started", "completed", "failed", "cancelled"}
 
@@ -50,18 +51,42 @@ _PLAN_SCHEMA = {
 
 _SYSTEM_INSTRUCTIONS = """You are the campaign coordinator for Reddit content.
 Read and obey the supplied orchestrator instructions. Assign the smallest useful next step to
-each selected persona. The only actions are create_post, comment, and wait.
+each selected persona. The only actions are create_post, create_profile_post, comment, and wait.
+In the first phase, give EVERY selected persona a productive assignment: create_post,
+create_profile_post, or comment. Do not leave selected personas unassigned or give them
+placeholder waits. For multiple agents, default to one new profile post and comments by
+the other agents on relevant entries in post_library. Use the library URLs verbatim; never
+invent URLs. If there is no relevant library target, assign posts instead. Honor explicit
+post-only or comment-only requests. Later phases may wait once the requested work is
+complete or a task is blocked. Do not add unnecessary work after completion.
 
 Use existing assignment IDs in wait_for when work depends on an earlier post/comment. Never
 invent a completed URL, username, post, or comment: only activity ledger entries are facts.
-Do not assign duplicate work that is already completed or in progress. Keep persona voices
-distinct. Supply final title and body for create_post, body for comment, and null
-title/body for wait. Instructions summarize the command. Comments are top-level replies
-only. Use an observed post
-URL as target_url, or null with exactly one create_post task ID in wait_for whose
-completed URL the executor will use. Only r/HackathonsCanada is supported in private
-runs. Mock runs use https://mock.local/posts/<task-id> URLs. Dependencies must reference
-tasks from previous phases. Never issue shell commands.
+Each new run is a new user request. When the current prompt asks for a post (including
+promotion), assign a new create_post or create_profile_post in the first phase. Past runs
+never satisfy the current request, even if their topic or prompt is identical. Assess
+completion and submission blockers only against the current run's tasks and activity.
+post_library contains confirmed posts from the dashboard library, including earlier runs.
+Use these only as comment targets, never as evidence the current request is complete.
+For comments, set target_url to the selected library post URL
+and leave wait_for empty unless the comment also depends on a current-run task.
+All comments must target a library post owned by a different persona. Its owner need not
+be selected in this run. Do not comment on the same persona's own content.
+Do not duplicate a task already completed or in progress within this run. Keep persona voices
+distinct. Supply final title and body for create_post and create_profile_post, body for
+comment, and null title/body for wait. Instructions summarize the command. Comments may
+reply to posts or to existing comments. Use an observed post or comment URL as target_url,
+or null with exactly one create_post or create_profile_post task ID in wait_for whose
+completed URL the executor will use. Comment targets may be any Reddit community or
+profile in the library; do not restrict them to a hardcoded subreddit.
+New posts should use create_profile_post under the persona's own profile with null
+target_url. Mock runs use https://mock.local/posts/<task-id> URLs,
+https://mock.local/comments/<task-id> URLs, or https://mock.local/profile-posts/<task-id>
+URLs. Dependencies must reference tasks from previous phases. Never issue shell commands.
+
+When the user prompt starts with "promote ", treat the remaining text as the cause or idea
+to promote. Use one new profile post and relevant library comments for the remaining agents
+when suitable library posts exist.
 
 Never plan platform-control evasion or spam. If the request conflicts with that boundary,
 assign a wait task explaining the blocker.
@@ -212,7 +237,13 @@ class CampaignOrchestrator:
             task = known_tasks[task_id]
             if task["persona"] != persona:
                 raise ValueError("activity persona does not own the task")
-            if kind != {"create_post": "post", "comment": "comment", "wait": "wait"}[task["action"]] and kind != "system":
+            action_kind = {
+                "create_post": "post",
+                "create_profile_post": "post",
+                "comment": "comment",
+                "wait": "wait",
+            }[task["action"]]
+            if kind != action_kind and kind != "system":
                 raise ValueError("activity kind does not match the task")
             activity = {
                 "id": uuid.uuid4().hex[:12],
@@ -329,13 +360,31 @@ class CampaignOrchestrator:
             raise OrchestratorConfigurationError(
                 f"could not read ORCHESTRATOR.md: {exc}"
             ) from exc
+        ledgers = [agent_state_store.public_ledger(name) for name in run["personas"]]
+        # Persona identities persist, but previous campaigns must not fulfill or
+        # block a new request. Durable receipts still protect retries of a task.
+        ledgers = [
+            {
+                **ledger,
+                "assignments": [item for item in ledger["assignments"] if item.get("run_id") == run["id"]],
+                "activity": [item for item in ledger["activity"] if item.get("run_id") == run["id"]],
+            }
+            for ledger in ledgers
+        ]
+        library = post_library.list_posts()
+        if run["environment"] == "private":
+            library = [post for post in library if urlsplit(post["url"]).netloc == "www.reddit.com"]
         return {
             "orchestrator_instructions": orchestrator_instructions,
             "user_prompt": run["prompt"],
+            "promotion_target": _promotion_target(run["prompt"]),
             "environment": run["environment"],
             "run_id": run["id"],
             "previous_phases": run["phases"],
-            "agents": [agent_state_store.public_ledger(name) for name in run["personas"]],
+            "post_library": library,
+            "existing_posts": library,
+            "existing_comments": _existing_comments(ledgers),
+            "agents": ledgers,
         }
 
     def _validate_plan(self, plan: dict[str, Any], run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -345,6 +394,11 @@ class CampaignOrchestrator:
         if not isinstance(raw_assignments, list) or not raw_assignments:
             raise OrchestratorModelError("plan must contain at least one assignment")
         assignments = []
+        known_targets = {
+            post["url"]: post["persona"] for post in post_library.list_posts()
+            if run["environment"] != "private" or urlsplit(post["url"]).netloc == "www.reddit.com"
+        }
+        known_ids = {task["id"]: task for phase in run["phases"] for task in phase["assignments"]}
         for item in raw_assignments:
             if not isinstance(item, dict) or item.get("persona") not in run["personas"]:
                 raise OrchestratorModelError("plan referenced an unknown persona")
@@ -355,12 +409,36 @@ class CampaignOrchestrator:
             wait_for = item.get("wait_for")
             if not isinstance(wait_for, list) or not all(isinstance(value, str) for value in wait_for):
                 raise OrchestratorModelError("wait_for must be a list of task IDs")
-            known_ids = {task["id"] for phase in run["phases"] for task in phase["assignments"]}
             if any(task_id not in known_ids for task_id in wait_for):
                 raise OrchestratorModelError("wait_for references an unknown task")
             for field in ("title", "body", "target_url"):
                 if item.get(field) is not None and not isinstance(item[field], str):
                     raise OrchestratorModelError(f"{field} must be a string or null")
+            if item["action"] == "comment":
+                target_url = item.get("target_url")
+                if target_url is not None:
+                    owner = known_targets.get(target_url)
+                    if owner is None:
+                        raise OrchestratorModelError(
+                            "comment target_url must be a stored agent post or comment URL"
+                        )
+                    if owner == item["persona"]:
+                        raise OrchestratorModelError(
+                            "comments must target another persona's library post"
+                        )
+                else:
+                    post_dependencies = [
+                        known_ids[task_id] for task_id in wait_for
+                        if known_ids[task_id]["action"] in {"create_post", "create_profile_post"}
+                    ]
+                    if len(post_dependencies) != 1:
+                        raise OrchestratorModelError(
+                            "comment without target_url needs exactly one post dependency"
+                        )
+                    if post_dependencies[0]["persona"] == item["persona"]:
+                        raise OrchestratorModelError(
+                            "comments must target another selected persona's post"
+                        )
             assignments.append(
                 {
                     "persona": item["persona"],
@@ -372,6 +450,14 @@ class CampaignOrchestrator:
                     "body": item.get("body"),
                 }
             )
+        if not run["phases"]:
+            active = {item["persona"] for item in assignments if item["action"] != "wait"}
+            missing = [name for name in run["personas"] if name not in active]
+            if missing:
+                raise OrchestratorModelError(
+                    "First phase requires a post or comment for every selected persona; missing: "
+                    + ", ".join(missing)
+                )
         return assignments
 
     def _validate_personas(self, requested: list[str]) -> list[str]:
@@ -430,3 +516,75 @@ def _response_output_text(response: dict[str, Any]) -> str:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _promotion_target(prompt: str) -> str | None:
+    prefix = "promote "
+    value = prompt.strip()
+    if not value.lower().startswith(prefix):
+        return None
+    target = value[len(prefix):].strip()
+    return target or None
+
+
+def _existing_posts(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _existing_activity_links(ledgers, "post")
+
+
+def _existing_comments(ledgers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _existing_activity_links(ledgers, "comment")
+
+
+def _comment_targets(ledgers: list[dict[str, Any]]) -> dict[str, str | None]:
+    return {
+        item["url"]: item.get("persona")
+        for item in [*_existing_posts(ledgers), *_existing_comments(ledgers)]
+    }
+
+
+def _existing_activity_links(ledgers: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    items = []
+    seen = set()
+    for ledger in ledgers:
+        for activity in ledger.get("activity", []):
+            if (
+                activity.get("kind") != kind
+                or activity.get("status") != "completed"
+                or not isinstance(activity.get("url"), str)
+                or not _commentable_target_url(activity["url"], kind)
+            ):
+                continue
+            url = activity["url"]
+            if url in seen:
+                continue
+            seen.add(url)
+            items.append({
+                "persona": ledger.get("persona"),
+                "task_id": activity.get("task_id"),
+                "run_id": activity.get("run_id"),
+                "url": url,
+                "content": activity.get("content"),
+                "reddit_username": activity.get("reddit_username"),
+                "timestamp": activity.get("timestamp"),
+            })
+    return items
+
+
+def _commentable_target_url(value: str, kind: str) -> bool:
+    parsed = urlsplit(value)
+    if parsed.scheme != "https":
+        return False
+    if parsed.netloc == "mock.local":
+        expected = "/posts/" if kind == "post" else "/comments/"
+        return parsed.path.startswith(expected)
+    if parsed.netloc != "www.reddit.com":
+        return False
+    if kind == "post":
+        return (
+            parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+            and len(parsed.path.strip("/").split("/")) == 5
+        )
+    return (
+        parsed.path.lower().startswith("/r/hackathonscanada/comments/")
+        and len(parsed.path.strip("/").split("/")) >= 6
+    )

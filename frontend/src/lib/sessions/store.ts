@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { BrowserAgent, SessionLogLine } from "./types";
+import type { BrowserAgent, CampaignPlan, SessionLogLine } from "./types";
 
 // ---------------------------------------------------------------------------
 // Live browser sessions. Talks to the FastAPI backend (agent-login branch)
@@ -21,11 +21,16 @@ interface SessionState {
   max: number;
   logs: SessionLogLine[];
   lastError: string | null;
+  campaignPlan: CampaignPlan | null;
 
   start: () => () => void;
-  launch: (body: {
-    target: string;
-    queries: string[];
+  planCampaign: (body: {
+    prompt: string;
+    count: number;
+  }) => Promise<CampaignPlan>;
+  executeCampaign: (runId: string) => Promise<CampaignPlan>;
+  launchAgents: (body: {
+    prompt: string;
     count: number;
   }) => Promise<void>;
   stop: (id: string) => Promise<void>;
@@ -56,6 +61,10 @@ function diffToLogs(
         persona: a.persona,
         level: a.level,
         msg: a.note,
+        url:
+          a.url && a.note.toLowerCase().includes("post confirmed")
+            ? a.url
+            : undefined,
         error: a.status === "failed",
       });
     }
@@ -63,12 +72,13 @@ function diffToLogs(
   return out;
 }
 
-export const useSessions = create<SessionState>((set, get) => ({
+export const useSessions = create<SessionState>((set) => ({
   connection: "connecting",
   agents: [],
   max: 0,
   logs: [],
   lastError: null,
+  campaignPlan: null,
 
   start: () => {
     let cancelled = false;
@@ -151,17 +161,93 @@ export const useSessions = create<SessionState>((set, get) => ({
     };
   },
 
-  launch: async (body) => {
-    const r = await fetch(`${BACKEND}/api/runs`, {
+  planCampaign: async (body) => {
+    const r = await fetch(`${BACKEND}/api/orchestrations`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, environment: "private" }),
     });
     if (!r.ok)
       throw new Error(
         (await r.json().catch(() => ({ detail: r.statusText }))).detail ??
-          "launch failed",
+          "Campaign planning failed",
       );
+    const campaignPlan = (await r.json()) as CampaignPlan;
+    set({ campaignPlan });
+    return campaignPlan;
+  },
+
+  executeCampaign: async (runId) => {
+    const r = await fetch(`${BACKEND}/api/orchestrations/${runId}/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phases: 2 }),
+    });
+    if (!r.ok)
+      throw new Error(
+        (await r.json().catch(() => ({ detail: r.statusText }))).detail ??
+          "Campaign execution failed",
+      );
+    let campaignPlan = (await r.json()) as CampaignPlan;
+    set({ campaignPlan });
+
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_LIVE_MS));
+      const status = await fetch(`${BACKEND}/api/orchestrations/${runId}`, {
+        cache: "no-store",
+      });
+      if (!status.ok)
+        throw new Error(
+          (await status.json().catch(() => ({ detail: status.statusText }))).detail ??
+            "Campaign status failed",
+        );
+      campaignPlan = (await status.json()) as CampaignPlan;
+      set({ campaignPlan });
+      if (campaignPlan.execution_status === "failed")
+        throw new Error(campaignPlan.execution_error || "Campaign execution failed");
+      const taskEvents = new Map(
+        (campaignPlan.events ?? [])
+          .filter((event) => event.type === "agent_activity" && event.task_id)
+          .map((event) => [event.task_id, event.status]),
+      );
+      const tasks = campaignPlan.phases.flatMap((phase) => phase.assignments);
+      const failed = (campaignPlan.events ?? []).find(
+        (event) => event.type === "agent_activity" && event.status === "failed",
+      );
+      if (failed)
+        throw new Error(failed.note || `${failed.persona || "Agent"} execution failed`);
+      const terminal = tasks.every((task) => {
+        const state = taskEvents.get(task.id);
+        return state === "completed" || state === "failed";
+      });
+      if (campaignPlan.execution_status === "completed") {
+        if (!terminal) throw new Error("Campaign stopped with pending assignments");
+        return campaignPlan;
+      }
+    }
+  },
+
+  launchAgents: async (body) => {
+    const r = await fetch(`${BACKEND}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "https://www.reddit.com",
+        mode: "reddit_browse",
+        prompt: body.prompt,
+        count: body.count,
+      }),
+    });
+    if (!r.ok)
+      throw new Error(
+        (await r.json().catch(() => ({ detail: r.statusText }))).detail ??
+          "Agent launch failed",
+      );
+    const data = (await r.json()) as { agents: BrowserAgent[] };
+    set((s) => ({
+      agents: data.agents,
+      logs: pushLogs(s.logs, diffToLogs(s.agents, data.agents)),
+    }));
   },
 
   stop: async (id) => {

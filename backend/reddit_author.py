@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from playwright.async_api import Page
 
-from . import agent_state_store, config
+from . import agent_state_store, config, post_library
 from .agent import Dreamer
 
 COMMUNITY = "HackathonsCanada"
@@ -29,6 +29,31 @@ def thread_url(value: str) -> str:
     return ORIGIN + parsed.path.rstrip("/") + "/"
 
 
+def comment_target_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or parsed.netloc != "www.reddit.com"
+            or not re.fullmatch(
+                r"/(?:r|user)/[a-z0-9_-]+/comments/[a-z0-9]+/[^/]+(?:/[a-z0-9]+)?/?",
+                parsed.path,
+                re.I,
+            )):
+        raise ValueError("Use a www.reddit.com community or profile post permalink from the library")
+    return ORIGIN + parsed.path.rstrip("/") + "/"
+
+
+def _comment_community(value: str) -> str:
+    parts = urlsplit(value).path.strip("/").split("/")
+    community = f"u_{parts[1]}" if parts[0].lower() == "user" else parts[1]
+    return COMMUNITY if community.casefold() == COMMUNITY.casefold() else community
+
+
+def _comment_parent_id(value: str) -> str:
+    parts = urlsplit(value).path.strip("/").split("/")
+    post_id = parts[3]
+    comment_id = parts[5] if len(parts) > 5 else None
+    return f"t1_{comment_id}" if comment_id else f"t3_{post_id}"
+
+
 def validated_body(body: str, limit: int) -> str:
     body = body.strip()
     if not body:
@@ -36,6 +61,24 @@ def validated_body(body: str, limit: int) -> str:
     if len(body) > limit:
         raise ValueError(f"Body exceeds {limit} characters")
     return body
+
+
+def profile_post_url(value: str, username: str) -> str:
+    """Return a same-origin permalink for a post owned by this profile."""
+    parsed = urlsplit(value)
+    profile = re.fullmatch(
+        rf"/user/{re.escape(username)}/comments/[a-z0-9]+/[^/]+/?",
+        parsed.path,
+        re.I,
+    )
+    legacy = re.fullmatch(
+        rf"/r/u_{re.escape(username)}/comments/[a-z0-9]+/[^/]+/?",
+        parsed.path,
+        re.I,
+    )
+    if parsed.scheme != "https" or parsed.netloc != "www.reddit.com" or not (profile or legacy):
+        raise ValueError("Reddit returned an invalid profile post permalink")
+    return ORIGIN + parsed.path.rstrip("/") + "/"
 
 
 class RedditAuthor:
@@ -104,6 +147,24 @@ class RedditAuthor:
                 "reddit_id": data["name"], "reddit_username": username,
                 "removed_by_category": data.get("removed_by_category")}
 
+    @staticmethod
+    def _matches_profile_post(data: dict, payload: dict, username: str) -> bool:
+        return (
+            data.get("author", "").casefold() == username.casefold()
+            and data.get("title") == payload["title"]
+            and data.get("selftext", "").strip() == payload["body"]
+            and data.get("subreddit", "").casefold() == f"u_{username}".casefold()
+        )
+
+    @staticmethod
+    def _profile_post_result(data: dict, username: str) -> dict:
+        return {
+            "url": profile_post_url(ORIGIN + data["permalink"], username),
+            "reddit_id": data["name"],
+            "reddit_username": username,
+            "removed_by_category": data.get("removed_by_category"),
+        }
+
     async def reconcile_post(self, request_id: str, post_id: str) -> dict:
         """Read-only recovery of an uncertain post using its observed Reddit ID."""
         if not re.fullmatch(r"t3_[a-z0-9]+", post_id):
@@ -126,16 +187,29 @@ class RedditAuthor:
 
     @staticmethod
     def _matches_comment(data: dict, payload: dict, username: str) -> bool:
-        post_id = "t3_" + urlsplit(payload["post_url"]).path.split("/")[4]
         return (data.get("author") == username
                 and data.get("body", "").strip() == payload["body"]
-                and data.get("parent_id") == post_id
-                and data.get("subreddit", "").casefold() == COMMUNITY.casefold())
+                and data.get("parent_id") == _comment_parent_id(payload["post_url"])
+                and data.get("subreddit", "").casefold() == payload.get("subreddit", COMMUNITY).casefold())
 
     @staticmethod
     def _comment_result(data: dict, username: str) -> dict:
         return {"url": ORIGIN + data["permalink"],
                 "reddit_id": data["name"], "reddit_username": username}
+
+    @staticmethod
+    def _comments(data: dict) -> list[dict]:
+        out = []
+        stack = list(data.get("data", {}).get("children", []))
+        while stack:
+            child = stack.pop(0)
+            item = child.get("data", {})
+            if child.get("kind") == "t1" or item.get("name", "").startswith("t1_"):
+                out.append(item)
+            replies = item.get("replies")
+            if isinstance(replies, dict):
+                stack.extend(replies.get("data", {}).get("children", []))
+        return out
 
     async def reconcile_comment(self, request_id: str, comment_id: str) -> dict:
         """Verify an uncertain comment by ID without submitting another reply."""
@@ -169,7 +243,12 @@ class RedditAuthor:
         agent_state_store.append_activity(self.dreamer.persona.name, {
             **receipt["payload"], **result, "status": "completed",
         }, reddit_username=username)
-        self.dreamer._emit(3, "Reddit submission confirmed", result["url"])
+        submission = (
+            "post"
+            if receipt["payload"]["action"] in {"create_post", "create_profile_post"}
+            else "comment"
+        )
+        self.dreamer._emit(3, f"Reddit {submission} confirmed", result["url"])
 
     async def _submit(self, path: Path, payload: dict, username: str, button, verify) -> dict:
         self.dreamer._check_stop()
@@ -185,7 +264,12 @@ class RedditAuthor:
         # Exclusive creation protects against concurrent processes using this key.
         with path.open("x", encoding="utf-8") as handle:
             json.dump(receipt, handle, indent=2)
-        self.dreamer._emit(2, f"submitting {payload['action']} to r/{COMMUNITY}")
+        destination = (
+            "the signed-in profile"
+            if payload["action"] == "create_profile_post"
+            else f"r/{COMMUNITY}"
+        )
+        self.dreamer._emit(2, f"submitting {payload['action']} to {destination}")
         await button.click(timeout=15_000)
         result = await verify()
         self._confirm(path, receipt, result, username)
@@ -222,32 +306,87 @@ class RedditAuthor:
         return await self._submit(path, payload, username,
                                   self.page.get_by_role("button", name="Post", exact=True), verify)
 
-    async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
-        url = thread_url(post_url)
-        body = validated_body(body, 10_000)
-        payload = dict(action="comment", subreddit=COMMUNITY, post_url=url,
-                       body=body, request_id=request_id)
+    async def create_profile_post(self, title: str, body: str, *, request_id: str) -> dict:
+        """Create a text post on the authenticated account's own profile."""
+        title = title.strip()
+        if not title or len(title) > 300 or "\n" in title or "\r" in title:
+            raise ValueError("Title must be a single line of 1 to 300 characters")
+        body = validated_body(body, 40_000)
+        payload = dict(
+            action="create_profile_post", target="profile", title=title,
+            body=body, request_id=request_id,
+        )
         path, cached = self._receipt(request_id, payload)
         if cached:
             return cached
         username = await self._identity()
+        existing = {data["name"] for data in await self._submitted(username)}
+        await self._open(f"{ORIGIN}/user/{username}/submit/?type=TEXT")
+        await self.page.get_by_role("textbox", name="Title", exact=True).fill(title)
+        await self.page.get_by_role(
+            "textbox", name="Post body text field", exact=True,
+        ).fill(body)
+
+        async def verify():
+            async with asyncio.timeout(45):
+                while True:
+                    try:
+                        for data in await self._submitted(username):
+                            if (data["name"] not in existing
+                                    and self._matches_profile_post(data, payload, username)):
+                                return self._profile_post_result(data, username)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)
+
+        return await self._submit(
+            path, payload, username,
+            self.page.get_by_role("button", name="Post", exact=True), verify,
+        )
+
+    async def comment(self, post_url: str, body: str, *, request_id: str) -> dict:
+        url = comment_target_url(post_url)
+        body = validated_body(body, 10_000)
+        community = _comment_community(url)
+        payload = dict(action="comment", subreddit=community, post_url=url,
+                       body=body, request_id=request_id)
+        path, cached = self._receipt(request_id, payload)
+        if cached:
+            return cached
+        parent_path = "/".join(urlsplit(url).path.strip("/").split("/")[:5])
+        library_post = next((post for post in post_library.list_posts()
+                             if urlsplit(post["url"]).netloc == "www.reddit.com"
+                             and urlsplit(post["url"]).path.strip("/") == parent_path), None)
+        if library_post is None:
+            raise ValueError("Comment target is not a confirmed post in the library")
+        username = await self._identity()
+        if (library_post.get("reddit_username") or "").casefold() == username.casefold():
+            raise ValueError("Choose another persona's library post for a comment")
         await self._open(url)
         before = await self._json(url + ".json?limit=500&sort=new")
         post = before[0]["data"]["children"][0]["data"]
-        if post.get("subreddit", "").casefold() != COMMUNITY.casefold() or post.get("locked") or post.get("archived"):
-            raise RuntimeError("Post is outside the test subreddit, locked, or archived")
-        existing = {c["data"]["name"] for c in before[1]["data"]["children"]}
+        if post.get("subreddit", "").casefold() != community.casefold() or post.get("locked") or post.get("archived"):
+            raise RuntimeError("Library post community does not match, or the post is locked or archived")
+        parent_id = _comment_parent_id(url)
+        if parent_id.startswith("t1_") and parent_id not in {
+            item.get("name") for item in self._comments(before[1])
+        }:
+            raise RuntimeError("Target comment was not found in the thread")
+        existing = {item["name"] for item in self._comments(before[1])}
         editor = self.page.locator('shreddit-composer').filter(has=self.page.locator('[contenteditable="true"]')).first
-        # Reddit keeps both a loading and a ready trigger in slotted DOM.
-        await self.page.locator('faceplate-tracker[noun="add_comment_button"] faceplate-textarea-input').last.click(timeout=15_000)
+        if parent_id.startswith("t1_"):
+            target = self.page.locator(f'shreddit-comment[thingid="{parent_id}"]').first
+            await target.get_by_role("button", name=re.compile(r"^\s*reply\s*$", re.I)).click(timeout=15_000)
+        else:
+            # Reddit keeps both a loading and a ready trigger in slotted DOM.
+            await self.page.locator('faceplate-tracker[noun="add_comment_button"] faceplate-textarea-input').last.click(timeout=15_000)
         await editor.locator('[contenteditable="true"]').fill(body)
 
         async def verify():
             async with asyncio.timeout(45):
                 while True:
                     listing = await self._json(url + ".json?limit=500&sort=new")
-                    for child in listing[1]["data"]["children"]:
-                        data = child["data"]
+                    for data in self._comments(listing[1]):
                         if data.get("name") not in existing and self._matches_comment(data, payload, username):
                             return self._comment_result(data, username)
                     await asyncio.sleep(2)

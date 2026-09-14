@@ -32,7 +32,7 @@ async def check(query: str) -> None:
             page = context.pages[0] if context.pages else await context.new_page()
             try:
                 async with asyncio.timeout(150):
-                    await dreamer._prepare_reddit_access(page)
+                    page = await dreamer._prepare_reddit_access(page)
                     if not dreamer._reddit_authenticated:
                         raise RuntimeError("Yusuf's Reddit login was not confirmed")
                     navigation = RedditBrowser(dreamer, page)

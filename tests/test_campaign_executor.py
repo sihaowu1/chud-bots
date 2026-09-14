@@ -16,7 +16,7 @@ class Planner:
                     wait_for=[], title="Synthetic kickoff", body="Test discussion")
         task["action"] = "create_post"
         if phases:
-            task.update(action="comment", title=None,
+            task.update(persona="Arthur", action="comment", title=None,
                         wait_for=[phases[0]["assignments"][0]["id"]])
         return {"summary": "Test plan", "assignments": [task]}
 
@@ -40,7 +40,7 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     async def start(self, environment="mock"):
-        return await self.coordinator.start("Demo", selected_personas=["Cobb"], environment=environment)
+        return await self.coordinator.start("Demo", selected_personas=["Cobb", "Arthur"], environment=environment)
 
     async def test_mock_chain_and_resume_do_not_publish_or_change_identity(self):
         state = agent_state_store.load_or_create("Cobb")
@@ -72,6 +72,126 @@ class ExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["events"][-1]["status"], "completed")
         await self.executor.execute(run["id"])
         self.publisher.assert_awaited_once()
+
+    async def test_profile_post_command_uses_profile_post_publisher_action(self):
+        class ProfilePlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Promote from the persona profile.",
+                    "assignments": [{
+                        "persona": "Cobb",
+                        "action": "create_profile_post",
+                        "instructions": "Post under Cobb's profile.",
+                        "target_url": None,
+                        "wait_for": [],
+                        "title": "Why this matters",
+                        "body": "A concise promotional post.",
+                    }],
+                }
+
+        coordinator = CampaignOrchestrator(
+            ProfilePlanner(), Path(self.temp.name) / "profile-runs",
+            Path(self.temp.name) / "profile-logs",
+        )
+        executor = CampaignExecutor(coordinator, self.publisher)
+        run = await coordinator.start(
+            "promote better public transit",
+            selected_personas=["Cobb"],
+            environment="private",
+        )
+
+        result = await executor.execute(run["id"])
+
+        command = self.publisher.call_args.args[0]
+        self.assertEqual(command.action, "profile-post")
+        self.assertEqual(command.request_id, run["phases"][0]["assignments"][0]["id"])
+        self.assertEqual(result["events"][-1]["kind"], "post")
+
+    async def test_comment_can_target_existing_post_url_without_dependency(self):
+        existing_url = "https://mock.local/posts/older-run-p1-t1"
+        agent_state_store.append_activity("Cobb", {
+            "run_id": "older-run",
+            "task_id": "older-run-p1-t1",
+            "kind": "post",
+            "status": "completed",
+            "content": "Older post",
+            "url": existing_url,
+            "reddit_username": "synthetic_cobb",
+        })
+
+        class ExistingPostPlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Reply to an existing post.",
+                    "assignments": [{
+                        "persona": "Arthur",
+                        "action": "comment",
+                        "instructions": "Add a useful reply to the previous post.",
+                        "target_url": existing_url,
+                        "wait_for": [],
+                        "title": None,
+                        "body": "Adding a follow-up on the existing discussion.",
+                    }],
+                }
+
+        coordinator = CampaignOrchestrator(
+            ExistingPostPlanner(), Path(self.temp.name) / "existing-runs",
+            Path(self.temp.name) / "existing-logs",
+        )
+        executor = CampaignExecutor(coordinator, self.publisher)
+        run = await coordinator.start(
+            "promote better public transit", selected_personas=["Cobb", "Arthur"]
+        )
+
+        result = await executor.execute(run["id"])
+
+        event = result["events"][-1]
+        self.assertEqual(event["kind"], "comment")
+        self.assertEqual(event["parent_url"], existing_url)
+        self.assertEqual(event["status"], "completed")
+
+    async def test_comment_can_target_existing_comment_url_without_dependency(self):
+        existing_url = "https://mock.local/comments/older-run-p2-t1"
+        agent_state_store.append_activity("Cobb", {
+            "run_id": "older-run",
+            "task_id": "older-run-p2-t1",
+            "kind": "comment",
+            "status": "completed",
+            "content": "Older comment",
+            "url": existing_url,
+            "reddit_username": "synthetic_cobb",
+        })
+
+        class ExistingCommentPlanner:
+            async def plan(self, _context):
+                return {
+                    "summary": "Reply to an existing comment.",
+                    "assignments": [{
+                        "persona": "Arthur",
+                        "action": "comment",
+                        "instructions": "Reply to the previous comment.",
+                        "target_url": existing_url,
+                        "wait_for": [],
+                        "title": None,
+                        "body": "Adding a nested follow-up.",
+                    }],
+                }
+
+        coordinator = CampaignOrchestrator(
+            ExistingCommentPlanner(), Path(self.temp.name) / "existing-comment-runs",
+            Path(self.temp.name) / "existing-comment-logs",
+        )
+        executor = CampaignExecutor(coordinator, self.publisher)
+        run = await coordinator.start(
+            "promote better public transit", selected_personas=["Cobb", "Arthur"]
+        )
+
+        result = await executor.execute(run["id"])
+
+        event = result["events"][-1]
+        self.assertEqual(event["kind"], "comment")
+        self.assertEqual(event["parent_url"], existing_url)
+        self.assertEqual(event["status"], "completed")
 
     async def test_failure_stops_replanning_and_blocks_resume(self):
         self.publisher.side_effect = TimeoutError("Uncertain submission")

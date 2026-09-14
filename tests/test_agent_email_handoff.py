@@ -1,12 +1,13 @@
 import unittest
+from itertools import product
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend import agent_state_store
 from backend.agent import (
     REDDIT_HOME_URL, REDDIT_LOGIN_URL, REDDIT_SIGNUP_URL, Dreamer, PlaywrightTimeoutError,
 )
-from backend.personas import Persona
+from backend.personas import Persona, pick
 
 
 class FakeField:
@@ -97,7 +98,15 @@ class FakePage:
         self.url = url
         self.visits.append(url)
 
+    async def bring_to_front(self):
+        pass
+
+    async def add_init_script(self, script):
+        pass
+
     def locator(self, selector):
+        if 'one-time-code' in selector:
+            return FakeInputs([])
         if "password" in selector:
             return self.password_field
         return self.field
@@ -118,6 +127,117 @@ def dreamer():
 
 
 class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reddit_challenge_uses_separate_temp_mail_tab(self):
+        agent = dreamer()
+        reddit = FakePage(FakeField())
+        reddit.url = "https://www.reddit.com/?js_challenge=1"
+        mailbox = FakePage(FakeField())
+        handle = SimpleNamespace(
+            json_value=AsyncMock(return_value="person@example.com")
+        )
+        mailbox.wait_for_function = AsyncMock(return_value=handle)
+        reddit.context = SimpleNamespace(new_page=AsyncMock(return_value=mailbox))
+
+        with (
+            patch.object(
+                agent_state_store,
+                "load_or_create",
+                return_value={"email": {"address": None, "password": None}},
+            ),
+            patch.object(agent_state_store, "save") as save,
+            patch.object(agent, "_copy_email", new=AsyncMock()) as copy_email,
+        ):
+            await agent._ensure_email(reddit)
+
+        reddit.context.new_page.assert_awaited_once_with()
+        self.assertNotIn("https://temp-mail.org/en/", reddit.visits)
+        self.assertEqual(mailbox.visits, ["https://temp-mail.org/en/"])
+        copy_email.assert_awaited_once_with(mailbox, "person@example.com")
+        save.assert_called_once()
+
+    async def test_saved_login_checks_email_code_before_confirming_home(self):
+        agent = dreamer()
+        page = FakePage(FakeField())
+        steps = []
+
+        async def verify(_page):
+            steps.append("verify")
+
+        async def confirm(_page):
+            steps.append("confirm")
+
+        with (
+            patch.object(agent, "_verify_reddit_email", side_effect=verify),
+            patch.object(agent, "_wait_for_reddit_home", side_effect=confirm),
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._login_reddit(page, "demo@example.com", "password")
+        self.assertEqual(steps, ["verify", "confirm"])
+
+    async def test_signup_checks_verification_between_email_and_password(self):
+        agent = dreamer()
+        agent.state.email = "demo@example.com"
+        page = FakePage(FakeField())
+        page.password_field.wait_for = AsyncMock(side_effect=[PlaywrightTimeoutError("email step"), None])
+        with (
+            patch.object(agent_state_store, "load_or_create", return_value={"email": {"password": "password"}}),
+            patch.object(agent, "_verify_reddit_email", new=AsyncMock()) as verify,
+            patch("backend.agent.asyncio.sleep", new=AsyncMock()),
+        ):
+            await agent._prepare_reddit_signup(page)
+        self.assertEqual(verify.await_count, 2)
+        self.assertEqual(verify.await_args_list[0].kwargs, {"password_step": True})
+        self.assertEqual(verify.await_args_list[1].kwargs, {})
+
+    async def test_every_persona_authenticates_with_and_without_tasks(self):
+        for persona, query, saved_login in product(pick(15), ("", "Python"), (False, True)):
+            with self.subTest(persona=persona.name, query=query, saved_login=saved_login):
+                agent = Dreamer(persona, query, "")
+                if query and agent.mode == "reddit_browse":
+                    agent.browse_subreddits = ("python", "coding", "programming")
+                page = FakePage(FakeField())
+                browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[page])])
+                pw = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=AsyncMock(return_value=browser)))
+                playwright = MagicMock()
+                playwright.__aenter__ = AsyncMock(return_value=pw)
+                playwright.__aexit__ = AsyncMock(return_value=False)
+                steps = []
+
+                async def email(_page):
+                    steps.append("temp-mail")
+
+                async def signup(_page):
+                    steps.append("signup")
+
+                async def login(_page, _address, _password):
+                    steps.append("login")
+
+                async def idle(_page):
+                    steps.append("action" if query else "idle")
+
+                with (
+                    patch("backend.agent.async_playwright", return_value=playwright),
+                    patch("backend.agent.steel_client.create_session", new=AsyncMock(return_value=SimpleNamespace(id="session", websocket_url="wss://example.test"))),
+                    patch("backend.agent.steel_client.session_summary", return_value={}),
+                    patch("backend.agent.steel_client.release_session", new=AsyncMock()),
+                    patch.object(agent_state_store, "load_or_create", return_value={
+                        "email": {"address": "demo@example.com", "password": "test"} if saved_login else {},
+                    }),
+                    patch.object(agent, "_login_reddit", side_effect=login),
+                    patch.object(agent, "_ensure_email", side_effect=email),
+                    patch.object(agent, "_prepare_reddit_signup", side_effect=signup),
+                    patch.object(agent, "_dream", side_effect=idle),
+                    patch.object(agent, "_hold_yusuf_session", new=AsyncMock()) as hold,
+                ):
+                    await agent.run()
+                self.assertEqual(agent.state.status, "done", agent.state.note)
+                expected = ["login"] if saved_login else ["temp-mail", "signup"]
+                self.assertEqual(steps, expected + ["action" if query else "idle"])
+                if persona.name == "Yusuf" and query:
+                    hold.assert_awaited_once_with(page)
+                else:
+                    hold.assert_not_awaited()
+
     async def test_delayed_home_challenge_is_checked_before_clicking_login(self):
         agent = dreamer()
         page = FakePage(FakeField())
@@ -353,7 +473,7 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
         agent.state.query = ""
         page = FakePage(FakeField())
         error = SimpleNamespace(is_visible=AsyncMock(return_value=True))
-        page.get_by_text = lambda pattern: FakeInputs([error])
+        page.get_by_text = lambda pattern: FakeInputs([error] if pattern.search('invalid password') else [])
         with patch("backend.agent.asyncio.sleep", new=AsyncMock()) as sleep:
             with self.assertRaisesRegex(RuntimeError, "rejected the saved login"):
                 await agent._dream(page)
@@ -460,6 +580,23 @@ class EmailHandoffTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(field.presses, [])
         self.assertEqual(field.fill_calls, [agent.state.email])
+
+    async def test_yusuf_completion_hold_keeps_session_alive_for_configured_duration(self):
+        persona = Persona(
+            name="Yusuf", traits=[], typing_delay_ms=(1, 1),
+            scroll_passes=(1, 1), max_depth=1, mobile=False,
+            browsing_mode="reddit_browse",
+        )
+        agent = Dreamer(persona, "topic", "")
+        page = SimpleNamespace(url="https://www.reddit.com/r/technology/")
+
+        with patch("backend.agent.YUSUF_COMPLETION_HOLD_SECONDS", 2), patch(
+            "backend.agent.asyncio.sleep", new=AsyncMock(),
+        ) as sleep:
+            await agent._hold_yusuf_session(page)
+
+        self.assertEqual(sleep.await_count, 2)
+        self.assertIn("keeping Yusuf's browser open", agent.state.note)
 
 
 if __name__ == "__main__":

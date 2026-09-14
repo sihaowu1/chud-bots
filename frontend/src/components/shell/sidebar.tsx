@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   BarChart3,
-  Bot,
+  BookOpen,
   Compass,
   LayoutGrid,
   Radar,
@@ -19,13 +18,12 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
-  { href: "/campaign", label: "Campaign", icon: Target },
-  { href: "/activity", label: "Activity", icon: Activity },
   { href: "/logs", label: "Logs", icon: ScrollText },
+  { href: "/library", label: "Library", icon: BookOpen },
   { href: "/opportunities", label: "Opportunities", icon: Compass },
-  { href: "/agents", label: "Agents", icon: Bot },
   { href: "/discoverability", label: "Discoverability", icon: Radar },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/campaign", label: "Campaign", icon: Target },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
